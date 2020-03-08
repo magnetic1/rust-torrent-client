@@ -1,6 +1,9 @@
-use base::{Value, Decoder, DecodeTo};
 use std::fs;
+use crate::bencode::decode::{Decoder, DecodeTo};
+use crate::bencode::value::Value;
 
+mod bencode;
+mod base;
 
 fn main() {
     println!("Hello, world!");

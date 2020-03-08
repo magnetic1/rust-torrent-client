@@ -12,7 +12,7 @@ members = [
 
 
 [dependencies]
-base = {path = "./base"}
+#base = {path = "./base"}
 encoding = "0.2"
 hex = {version = "0.3", default-features = false, optional = true}
 bencode = "0.1"
