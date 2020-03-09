@@ -4,6 +4,7 @@ use core::fmt;
 use std::str::FromStr;
 use std::collections::BTreeMap;
 use crate::bencode::hash::Sha1;
+use crate::bencode::Integer;
 
 pub struct Decoder<'a> {
     data: Cursor<&'a [u8]>,
@@ -146,7 +147,7 @@ impl<'a> Decoder<'a> {
 
     /// Reads a number from the stream.
     /// This does not include the `i` prefix and `e` suffix.
-    pub fn read_number<T: FromStr>(&mut self) -> Result<T, DecodeError> {
+    pub fn read_number<T: Integer>(&mut self) -> Result<T, DecodeError> {
         let buf = self.read_while(is_number)?;
 
         if buf.is_empty() || (buf.len() > 1 && buf[0] == b'0') || buf == b"-0" {
@@ -230,7 +231,7 @@ impl<'a> Decoder<'a> {
     }
 
     /// Reads an integer value from the stream.
-    pub fn read_integer<T: FromStr>(&mut self) -> Result<T, DecodeError> {
+    pub fn read_integer<T: Integer>(&mut self) -> Result<T, DecodeError> {
         self.expect(b'i')?;
         let n = self.read_number()?;
         self.expect(b'e')?;
