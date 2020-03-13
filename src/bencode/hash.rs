@@ -19,17 +19,8 @@ impl Sha1 {
 
         unsafe { String::from_utf8_unchecked(buf.to_vec()) }
     }
-}
 
-impl Deref for Sha1 {
-    type Target = [u8; 20];
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Sha1 {
     pub fn to_sha1list(bytes: &[u8]) -> Vec<Sha1> {
         let len = 20;
         let mut i = 20;
@@ -47,6 +38,16 @@ impl Sha1 {
             i += len;
         }
         res
+    }
+
+
+}
+
+impl Deref for Sha1 {
+    type Target = [u8; 20];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
