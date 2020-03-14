@@ -1,7 +1,6 @@
 use std::io::{Cursor, Read};
 use std::ops::{Deref, DerefMut};
 use core::fmt;
-use std::str::FromStr;
 use std::collections::BTreeMap;
 use crate::bencode::hash::Sha1;
 use crate::bencode::Integer;

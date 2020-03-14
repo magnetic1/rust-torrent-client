@@ -1,9 +1,8 @@
 use std::collections::BTreeMap;
-use core::{fmt, ptr};
+use core::fmt;
 use std::fmt::{Formatter, Error};
 use crate::bencode::hash::Sha1;
 use crate::bencode::decode::{DecodeTo, Decoder, DecodeError};
-use bencode::ToBencode;
 use std::fs;
 use crate::base::meta_info::{TorrentMetaInfo, Info};
 
@@ -205,7 +204,7 @@ impl IntoValue for Vec<Sha1> {
 
 impl<T: IntoValue> IntoValue for Vec<T> {
     fn into_value(self) -> Value {
-        let mut res = self.into_iter()
+        let res = self.into_iter()
             .map(|item| {
                 item.into_value()
             }).collect();
