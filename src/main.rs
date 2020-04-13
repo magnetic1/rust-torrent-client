@@ -4,6 +4,7 @@ use crate::bencode::value::Value;
 
 mod bencode;
 mod base;
+mod net;
 
 fn main() {
     println!("Hello, world!");

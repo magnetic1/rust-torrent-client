@@ -14,4 +14,10 @@ encoding = "0.2"
 hex = {version = "0.3", default-features = false, optional = true}
 bencode = "0.1"
 
+getopts = "0.2"
+hyper = "0.10"
+rand = "0.3"
+rust-crypto = "0.2"
+url = "0.2"
 
+snafu = "0.6.6"

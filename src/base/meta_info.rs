@@ -4,6 +4,7 @@ use crate::bencode::hash::Sha1;
 use crate::bencode::value::{FromValue, Value, IntoValue};
 use crate::base::meta_info::Info::{Single, Multi};
 use std::collections::BTreeMap;
+use crate::bencode::encode::{Encoder, EncodeTo};
 
 #[derive(Debug)]
 pub struct TorrentMetaInfo {
@@ -16,13 +17,58 @@ pub struct TorrentMetaInfo {
     pub encoding: Option<String>,
 }
 
-#[derive(Debug)]
+impl TorrentMetaInfo {
+    pub fn parse(bytes: &[u8]) -> TorrentMetaInfo {
+        let mut d = Decoder::new(bytes);
+        let v: Value = DecodeTo::decode(&mut d).unwrap();
+
+        TorrentMetaInfo::from_value(&v).unwrap()
+    }
+
+    pub fn length(&self) -> usize {
+        let info = &self.info;
+        match info {
+            Single(i) => {i.length},
+            Multi(m) => {
+                let mut len = 0;
+                for item in &m.files {
+                    len += item.length;
+                }
+                len
+            },
+        }
+    }
+
+    pub fn info_hash(&self) -> Sha1 {
+        let info = &self.info;
+        // let s: Info = info.;
+        let v = IntoValue::into_value(info.clone());
+
+        let mut encoder = Encoder::new();
+        v.encode(&mut encoder).unwrap();
+
+        Sha1::calculate_sha1(&encoder.into_bytes())
+    }
+
+    pub fn announce(&mut self) -> String {
+        match &self.announce_list {
+            Some(v) => {
+                self.announce.clone().unwrap()
+            },
+            None => {
+                self.announce.clone().unwrap()
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Info {
     Single(SingleInfo),
     Multi(MultiInfo),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SingleInfo {
     pub length: usize,
     pub md5sum: Option<String>,
@@ -34,7 +80,7 @@ pub struct SingleInfo {
     pub pieces: Vec<Sha1>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MultiInfo {
     pub files: Vec<FileInfo>,
     pub name: String,
@@ -42,7 +88,7 @@ pub struct MultiInfo {
     pub pieces: Vec<Sha1>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileInfo {
     pub length: usize,
     pub md5sum: Option<String>,
