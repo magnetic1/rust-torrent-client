@@ -25,7 +25,28 @@ impl TorrentMetaInfo {
         TorrentMetaInfo::from_value(&v).unwrap()
     }
 
-    pub fn length(&self) -> usize {
+    pub fn piece_length(&self) -> usize {
+        match &self.info {
+            Single(s) => {s.piece_length},
+            Multi(m) => {m.piece_length},
+        }
+    }
+
+    pub fn num_pieces(&self) -> usize {
+        match &self.info {
+            Single(s) => {s.pieces.len()},
+            Multi(m) => {m.pieces.len()},
+        }
+    }
+
+    pub fn pieces(&self) -> &[Sha1] {
+        match &self.info {
+            Single(s) => {&s.pieces},
+            Multi(m) => {&m.pieces},
+        }
+    }
+
+    pub fn length(&self) -> u64 {
         let info = &self.info;
         match info {
             Single(i) => {i.length},
@@ -70,7 +91,7 @@ pub enum Info {
 
 #[derive(Debug, Clone)]
 pub struct SingleInfo {
-    pub length: usize,
+    pub length: u64,
     pub md5sum: Option<String>,
     // 字符串,BitTorrent下载路径中最上层的目录名
     pub name: String,
@@ -90,7 +111,7 @@ pub struct MultiInfo {
 
 #[derive(Debug, Clone)]
 pub struct FileInfo {
-    pub length: usize,
+    pub length: u64,
     pub md5sum: Option<String>,
     pub path: Vec<String>,
 }
@@ -372,5 +393,32 @@ mod tests {
 
         let s: TorrentMetaInfo = FromValue::from_value(&v).unwrap();
         println!("{:#?}", s);
+    }
+
+    #[test]
+    fn pieces_files() {
+        let f = fs::read(
+            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
+        ).unwrap();
+        let mut decoder = Decoder::new(f.as_slice());
+
+        let v = Value::decode(&mut decoder).unwrap();
+
+        let s: TorrentMetaInfo = FromValue::from_value(&v).unwrap();
+
+        if let Info::Multi(m) = s.info {
+            let piece_num = m.pieces.len();
+            let piece_len = m.piece_length;
+
+            let per_file_piece_sum = m.files.iter().map(|f| {
+                (f.length as f64 / piece_len as f64).ceil() as usize
+            }).sum::<usize>();
+
+            let files_piece_sum = m.files.iter().map(|f| {
+                (f.length as usize / piece_len) + 1
+            }).sum::<usize>();
+
+            println!("{}, {}, {}", per_file_piece_sum, files_piece_sum, piece_num)
+        }
     }
 }

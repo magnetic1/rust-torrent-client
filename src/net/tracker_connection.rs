@@ -8,7 +8,7 @@ use std::{convert, io};
 use crate::bencode::decode::{Decoder, DecodeTo, DecodeError};
 use crate::bencode::value::{Value, FromValue};
 
-pub fn get_tracker_response(peer_id: &str, announce: &str, length: usize, info_hash: &[u8], listener_port: u16) -> Result<TrackerResponse, Error> {
+pub fn get_tracker_response(peer_id: &str, announce: &str, length: u64, info_hash: &[u8], listener_port: u16) -> Result<TrackerResponse, Error> {
     let length_string = length.to_string();
     let encoded_info_hash = percent_encode(info_hash, FORM_URLENCODED_ENCODE_SET);
     let listener_port_string = listener_port.to_string();
