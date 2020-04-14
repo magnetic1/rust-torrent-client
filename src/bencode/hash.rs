@@ -16,7 +16,7 @@ impl Sha1 {
         let mut buf: Vec<u8> = vec![0; hasher.output_bytes()];
         hasher.result(&mut buf);
 
-        let sha1 = Sha1::to_sha1list(&buf).remove(0);
+        let sha1 = Sha1::to_sha1list(&buf).swap_remove(0);
         return sha1;
     }
 

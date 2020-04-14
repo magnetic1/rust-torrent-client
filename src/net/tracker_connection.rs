@@ -41,7 +41,6 @@ pub fn get_tracker_response_by_metainfo(peer_id: &str, metainfo: &TorrentMetaInf
     let announce = "http://explodie.org:6969/announce";
     let info_hash = &metainfo.info_hash().0;
     get_tracker_response(peer_id, announce, metainfo.length(), info_hash, listener_port)
-
 }
 
 pub fn get_peers(peer_id: &str, metainfo: &TorrentMetaInfo, listener_port: u16) -> Result<Vec<Peer>, Error> {
@@ -100,8 +99,9 @@ mod tests {
     use std::fs;
     use crate::bencode::decode::{Decoder, DecodeTo};
     use crate::base::meta_info::TorrentMetaInfo;
-    use crate::net::tracker_connection::{get_peers};
+    use crate::net::tracker_connection::{get_peers, Error};
     use rand::Rng;
+    use crate::net::peer_connection::Peer;
 
     const PEER_ID_PREFIX: &'static str = "-RC0001-";
 
@@ -118,12 +118,26 @@ mod tests {
             Ok(_) => {}
             Err(e) => { println!("{:#?}", e) }
         }
+    }
 
-        fn generate_peer_id() -> String {
-            let mut rng = rand::thread_rng();
-            let rand_chars: String = rng.gen_ascii_chars().take(20 - PEER_ID_PREFIX.len()).collect();
-            format!("{}{}", PEER_ID_PREFIX, rand_chars)
-        }
+    fn generate_peer_id() -> String {
+        let mut rng = rand::thread_rng();
+        let rand_chars: String = rng.gen_ascii_chars().take(20 - PEER_ID_PREFIX.len()).collect();
+        format!("{}{}", PEER_ID_PREFIX, rand_chars)
+    }
+
+    #[test]
+    fn tracker_response_chain() {
+        let f = fs::read(
+            r#"C:\Users\12287\Downloads\[桜都字幕组][碧蓝航线_Azur Lane][01-12 END][GB][1080P].torrent"#
+        ).map_err(Error::IoError).and_then(|f| {
+                let mut decoder = Decoder::new(f.as_slice());
+                let torrent_meta_info =
+                    TorrentMetaInfo::decode(&mut decoder)?;
+                Ok(torrent_meta_info)
+        }).and_then(|torrent_meta_info| -> Result<Vec<Peer>, Error> {
+            get_peers(&generate_peer_id(), &torrent_meta_info, 8888)
+        });
     }
 }
 
