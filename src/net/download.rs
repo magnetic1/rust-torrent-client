@@ -10,7 +10,7 @@ use async_std::prelude::*;
 use futures::stream::FuturesUnordered;
 use futures::future::{FutureExt};
 use futures::StreamExt;
-use async_std::path::Path;
+use async_std::path::{Path, PathBuf};
 use std::sync::mpsc::{Sender, SendError};
 
 
@@ -23,6 +23,7 @@ pub struct Download {
     pieces:          Vec<Piece>,
     files:           Vec<Arc<Mutex<File>>>,
     file_offsets:    Vec<u64>,
+    file_paths:      Vec<String>,
     peer_channels:   Arc<Mutex<Vec<Sender<IPC>>>>,
 }
 
@@ -81,9 +82,9 @@ impl Piece {
 
             // calculate the hash, verify it, and update is_complete
             let s = self.is_complete.clone();
-            let mut s = s.lock().await;
-            *s = self.hash == Sha1::calculate_sha1(&buffer);
-            Ok(*s)
+            let mut is_complete = s.lock().await;
+            *is_complete = self.hash == Sha1::calculate_sha1(&buffer);
+            Ok(*is_complete)
         })
     }
 
@@ -138,11 +139,19 @@ impl Download {
         {
             match &meta_info.info {
                 Info::Single(s) => {
-                    file_infos.push((s.length, s.name.clone()));
+                    let mut file_path = String::from("downloads/");
+                    file_path.push_str(&s.name);
+                    file_path.push_str(".temp");
+
+                    file_infos.push((s.length, file_path));
                 },
                 Info::Multi(m) => {
                     for f in &m.files {
-                        file_infos.push((f.length, f.path.join("/")));
+                        let mut file_path = String::from("downloads/");
+                        file_path.push_str(&f.path.join("/"));
+                        file_path.push_str(".temp");
+
+                        file_infos.push((f.length, file_path));
                     }
                 },
             };
@@ -151,13 +160,16 @@ impl Download {
         // create files and file_offsets
         let mut files = Vec::with_capacity(file_infos.len());
         let mut file_offsets = Vec::with_capacity(file_infos.len() + 1);
+        let mut file_paths = Vec::with_capacity(file_infos.len());
         let mut file_offset = 0;
         let _s: Result<(), Error> = task::block_on(async  {
             for (length, file_path) in file_infos {
-                let path = Path::new("downloads").join(&file_path);
+                let path = Path::new(&file_path);
                 let mut file = OpenOptions::new().create(true).read(true).write(true).open(path).await?;
+
                 files.push(Arc::new(Mutex::new(file)));
                 file_offsets.push(file_offset);
+                file_paths.push(file_path);
 
                 file_offset = file_offset + length;
             }
@@ -191,6 +203,7 @@ impl Download {
             meta_info,
             pieces,
             files,
+            file_paths,
             peer_channels: Arc::new(Mutex::new(Vec::new())),
             file_offsets
         })
@@ -216,8 +229,34 @@ impl Download {
             if !valid {
                 piece.reset_blocks();
             } else {
-                // todo: verify files;
-                // todo: solve all dead lock
+                // verify files. rename it if finished.
+                let (index, v)
+                    = search_ptrs(&self.file_offsets, piece.offset, piece.length as usize);
+                let piece_len = self.meta_info.piece_length();
+
+                for i in 0..v.len() {
+                    let name = &self.file_paths[i+index];
+
+                    if name.ends_with(".temp") {
+                        let low = self.file_offsets[i + index] as usize / piece_len;
+                        let high = (self.file_offsets[i + index + 1] - 1) as usize / piece_len;
+
+                        let mut file_is_complete= true;
+                        for p in low..=high {
+                            let b = *self.pieces[p].is_complete.clone().lock().await;
+                            if !b {
+                                file_is_complete = false;
+                                break;
+                            }
+                        };
+
+                        if file_is_complete {
+                            async_std::fs::rename(name, &name[..name.len() - 5]);
+                        }
+                    }
+
+                }
+
             }
         }
 
