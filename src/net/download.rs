@@ -8,7 +8,7 @@ use async_std::fs::{File, OpenOptions};
 use async_std::task;
 use async_std::prelude::*;
 use futures::stream::FuturesUnordered;
-use futures::future::{FutureExt};
+use futures::future::FutureExt;
 use futures::StreamExt;
 use async_std::path::{Path, PathBuf};
 use std::sync::mpsc::{Sender, SendError};
@@ -19,25 +19,25 @@ pub const BLOCK_SIZE: u32 = 16 * 1024;
 
 pub struct Download {
     pub our_peer_id: String,
-    pub meta_info:       TorrentMetaInfo,
-    pieces:          Vec<Piece>,
-    files:           Vec<Arc<Mutex<File>>>,
-    file_offsets:    Vec<u64>,
-    file_paths:      Vec<String>,
-    peer_channels:   Arc<Mutex<Vec<Sender<IPC>>>>,
+    pub meta_info: TorrentMetaInfo,
+    pieces: Vec<Piece>,
+    files: Vec<Arc<Mutex<File>>>,
+    file_offsets: Vec<u64>,
+    file_paths: Vec<String>,
+    peer_channels: Arc<Mutex<Vec<Sender<IPC>>>>,
 }
 
 struct Piece {
-    length:      u32,
-    offset:      u64,
-    hash:        Sha1,
-    blocks:      Vec<Arc<Mutex<Block>>>,
+    length: u32,
+    offset: u64,
+    hash: Sha1,
+    blocks: Vec<Arc<Mutex<Block>>>,
     is_complete: Arc<Mutex<bool>>,
 }
 
 struct Block {
-    index:       u32,
-    length:      u32,
+    index: u32,
+    length: u32,
     is_complete: bool,
 }
 
@@ -52,7 +52,6 @@ impl Block {
 }
 
 impl Piece {
-
     fn new(length: u32, offset: u64, hash: Sha1) -> Piece {
         // create blocks
         let num_blocks = (length as f64 / BLOCK_SIZE as f64).ceil() as usize;
@@ -113,10 +112,10 @@ impl Piece {
                         if !b {
                             return false;
                         }
-                    },
+                    }
                     None => {
                         return true;
-                    },
+                    }
                 }
             };
         });
@@ -132,9 +131,7 @@ impl Piece {
 }
 
 impl Download {
-
     pub fn new(our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<Download, Error> {
-        
         let mut file_infos = Vec::new();
         {
             match &meta_info.info {
@@ -144,7 +141,7 @@ impl Download {
                     file_path.push_str(".temp");
 
                     file_infos.push((s.length, file_path));
-                },
+                }
                 Info::Multi(m) => {
                     for f in &m.files {
                         let mut file_path = String::from("downloads/");
@@ -153,16 +150,16 @@ impl Download {
 
                         file_infos.push((f.length, file_path));
                     }
-                },
+                }
             };
         }
-        
+
         // create files and file_offsets
         let mut files = Vec::with_capacity(file_infos.len());
         let mut file_offsets = Vec::with_capacity(file_infos.len() + 1);
         let mut file_paths = Vec::with_capacity(file_infos.len());
         let mut file_offset = 0;
-        let _s: Result<(), Error> = task::block_on(async  {
+        let _s: Result<(), Error> = task::block_on(async {
             for (length, file_path) in file_infos {
                 let path = Path::new(&file_path);
                 let mut file = OpenOptions::new().create(true).read(true).write(true).open(path).await?;
@@ -181,7 +178,7 @@ impl Download {
 
         // create pieces
         let piece_length = meta_info.piece_length();
-        let num_pieces = meta_info.num_pieces() ;
+        let num_pieces = meta_info.num_pieces();
 
         let mut pieces = Vec::with_capacity(num_pieces);
 
@@ -205,15 +202,14 @@ impl Download {
             files,
             file_paths,
             peer_channels: Arc::new(Mutex::new(Vec::new())),
-            file_offsets
+            file_offsets,
         })
     }
 
     pub async fn store(&self, piece_index: u32, block_index: u32, data: Vec<u8>) -> Result<(), Error> {
-
         let piece = &self.pieces[piece_index as usize];
 
-        if  piece.has_block(block_index) || *piece.is_complete.clone().lock().await {
+        if piece.has_block(block_index) || *piece.is_complete.clone().lock().await {
             // if we already have this block, do an early return to avoid re-writing the piece, sending complete messages, etc
             return Ok(());
         }
@@ -235,13 +231,13 @@ impl Download {
                 let piece_len = self.meta_info.piece_length();
 
                 for i in 0..v.len() {
-                    let name = &self.file_paths[i+index];
+                    let name = &self.file_paths[i + index];
 
                     if name.ends_with(".temp") {
                         let low = self.file_offsets[i + index] as usize / piece_len;
                         let high = (self.file_offsets[i + index + 1] - 1) as usize / piece_len;
 
-                        let mut file_is_complete= true;
+                        let mut file_is_complete = true;
                         for p in low..=high {
                             let b = *self.pieces[p].is_complete.clone().lock().await;
                             if !b {
@@ -251,17 +247,15 @@ impl Download {
                         };
 
                         if file_is_complete {
-                            async_std::fs::rename(name, &name[..name.len() - 5]);
+                            async_std::fs::rename(name, &name[..name.len() - 5]).await;
                         }
                     }
-
                 }
-
             }
         }
 
         // notify peers that this block is complete
-        self.broadcast(IPC::BlockComplete(piece_index, block_index));
+        self.broadcast(IPC::BlockComplete(piece_index, block_index)).await;
 
         // notify peers if piece is complete
         if *piece.is_complete.clone().lock().await {
@@ -277,11 +271,8 @@ impl Download {
         Ok(())
     }
 
-    pub fn register_peer(&self, channel: Sender<IPC>) {
-        task::block_on(async move {
-            self.peer_channels.clone().lock().await.push(channel);
-        });
-
+    pub async fn register_peer(&self, channel: Sender<IPC>) {
+        self.peer_channels.clone().lock().await.push(channel);
     }
 
     pub async fn retrieve_data(&self, request: &RequestMetadata) -> Result<Vec<u8>, Error> {
@@ -298,44 +289,40 @@ impl Download {
         }
     }
 
-    pub fn have_pieces(&self) -> Vec<bool> {
-        task::block_on(async {
-            let mut res = Vec::with_capacity(self.pieces.len());
+    pub async fn have_pieces(&self) -> Vec<bool> {
+        let mut res = Vec::with_capacity(self.pieces.len());
 
-            for p in &self.pieces {
-                res.push(*p.is_complete.clone().lock().await);
-            }
-            res
-        })
+        for p in &self.pieces {
+            res.push(*p.is_complete.clone().lock().await);
+        }
+        res
     }
 
-    pub fn incomplete_blocks_for_piece(&self, piece_index: u32) -> Vec<(u32,u32)> {
+    pub async fn incomplete_blocks_for_piece(&self, piece_index: u32) -> Vec<(u32, u32)> {
         let ref piece = self.pieces[piece_index as usize];
-        task::block_on(async {
-            if {!*piece.is_complete.clone().lock().await} {
-                piece.blocks.iter()
-                    .filter(|b| {
-                        task::block_on(async {
-                            !b.clone().lock().await.is_complete
-                        })
-                    }).map(|b| {
-                        task::block_on(async {
-                            let b = b.clone();
-                            let b = b.lock().await;
-                            (b.index, b.length)
-                        })
-                    }).collect()
-            } else {
-                vec![]
-            }
-        })
+        if { !*piece.is_complete.clone().lock().await } {
+            piece.blocks.iter()
+                .filter(|b| {
+                    task::block_on(async {
+                        !b.clone().lock().await.is_complete
+                    })
+                }).map(|b| {
+                task::block_on(async {
+                    let b = b.clone();
+                    let b = b.lock().await;
+                    (b.index, b.length)
+                })
+            }).collect()
+        } else {
+            vec![]
+        }
     }
 
     fn is_complete(&self) -> bool {
         task::block_on(async {
             for piece in self.pieces.iter() {
                 if !*piece.is_complete.clone().lock().await {
-                    return false
+                    return false;
                 }
             }
             true
@@ -356,15 +343,14 @@ impl Download {
 
 pub async fn store_block(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
                          piece_offset: u64, block_index: u32, data: &[u8]) -> Result<(), Error> {
-
-    let block_offset = piece_offset + (block_index  * BLOCK_SIZE) as u64;
+    let block_offset = piece_offset + (block_index * BLOCK_SIZE) as u64;
 
     let (i, ptr_vec) =
         search_ptrs(file_offsets, block_offset, data.len());
 
     for (a, (block_ptr, file_ptr, len)) in ptr_vec.into_iter().enumerate() {
         let mut file = files[i + a].clone();
-        let mut file= file.lock().await;
+        let mut file = file.lock().await;
         store(file, file_ptr, block_ptr, len as u64, data).await?;
     }
 
@@ -409,7 +395,7 @@ fn search_ptrs(file_offsets: &[u64], offset: u64, len: usize) -> (usize, Vec<(us
     let mut file_ptr = offset - file_offsets[i];
 
     while left + file_offsets[i] + file_ptr > file_offsets[i + 1] {
-        let l =  file_offsets[i + 1] - file_offsets[i] - file_ptr;
+        let l = file_offsets[i + 1] - file_offsets[i] - file_ptr;
         vec.push((data_ptr, file_ptr, l as usize));
 
         data_ptr = data_ptr + l as usize;
@@ -424,7 +410,7 @@ fn search_ptrs(file_offsets: &[u64], offset: u64, len: usize) -> (usize, Vec<(us
 
 
 async fn read(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
-              offset: u64, len: u32) -> Result<Vec<u8>, Error>  {
+              offset: u64, len: u32) -> Result<Vec<u8>, Error> {
     let (i, ptr_vec) =
         search_ptrs(file_offsets, offset, len as usize);
 
@@ -440,7 +426,6 @@ async fn read(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
     }
     Ok(buffer)
 }
-
 
 
 #[derive(Debug)]
@@ -470,9 +455,9 @@ mod tests {
 
         assert_eq!(search_ptrs(&file_offsets, 15, 1), (1, vec![(0, 7, 1)]));
         assert_eq!(search_ptrs(&file_offsets, 15, 2), (1, vec![(0, 7, 1), (1, 0, 1)]));
-        assert_eq!(search_ptrs(&file_offsets, 0, 8),  (0, vec![(0, 0, 8)]));
-        assert_eq!(search_ptrs(&file_offsets, 8, 8),  (1, vec![(0, 0, 8)]));
-        assert_eq!(search_ptrs(&file_offsets, 8, 9),  (1, vec![(0, 0, 8), (8, 0, 1)]));
+        assert_eq!(search_ptrs(&file_offsets, 0, 8), (0, vec![(0, 0, 8)]));
+        assert_eq!(search_ptrs(&file_offsets, 8, 8), (1, vec![(0, 0, 8)]));
+        assert_eq!(search_ptrs(&file_offsets, 8, 9), (1, vec![(0, 0, 8), (8, 0, 1)]));
         assert_eq!(search_ptrs(&file_offsets, 8, 16), (1, vec![(0, 0, 8), (8, 0, 8)]));
     }
 
@@ -484,7 +469,6 @@ mod tests {
         let f1 = f.clone();
 
         let task1 = task::spawn(async move {
-
             if !*f1.lock().await {
                 // let p = f1.lock().await;
                 println!("task2 f locked");
