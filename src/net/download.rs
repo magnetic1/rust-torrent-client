@@ -259,7 +259,17 @@ impl Download {
 
                         let mut file_is_complete = true;
                         for p in low..=high {
-                            let b = *self.pieces[p].is_complete.clone().lock().await;
+                            // let b = *self.pieces[p].is_complete.clone().lock().await;
+                            // if !b {
+                            //     file_is_complete = false;
+                            //     break;
+                            // }
+
+                            let b = match self.pieces[p].is_complete.try_lock() {
+                                Some(s) => {*s},
+                                None => { false },
+                            };
+
                             if !b {
                                 file_is_complete = false;
                                 break;
