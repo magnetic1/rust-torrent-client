@@ -8,6 +8,9 @@ use std::{convert, io};
 use crate::bencode::decode::{Decoder, DecodeTo, DecodeError};
 use crate::bencode::value::{Value, FromValue};
 
+// async fn get()
+
+
 pub fn get_tracker_response(peer_id: &str, announce: &str, length: u64, info_hash: &[u8], listener_port: u16) -> Result<TrackerResponse, Error> {
     let length_string = length.to_string();
     let encoded_info_hash = percent_encode(info_hash, FORM_URLENCODED_ENCODE_SET);
@@ -33,7 +36,7 @@ pub fn get_tracker_response(peer_id: &str, announce: &str, length: u64, info_has
     println!("{}", body.len());
 
     let res = TrackerResponse::parse(&body)?;
-    println!("{:#?}", res);
+    // println!("{:#?}", res);
     Ok(res)
 }
 
@@ -42,7 +45,9 @@ pub fn get_tracker_response_by_metainfo(peer_id: &str, metainfo: &TorrentMetaInf
     let info_hash = &metainfo.info_hash().0;
     get_tracker_response(peer_id, announce, metainfo.length(), info_hash, listener_port)
 }
-
+/// 116.249.137.177:51636
+/// 104.152.209.30:64223
+/// 205.185.122.158:54794
 pub fn get_peers(peer_id: &str, metainfo: &TorrentMetaInfo, listener_port: u16) -> Result<Vec<Peer>, Error> {
     let res = get_tracker_response_by_metainfo(peer_id, metainfo, listener_port)?;
     Ok(res.peers)
@@ -102,6 +107,7 @@ mod tests {
     use crate::net::tracker_connection::{get_peers, Error};
     use rand::Rng;
     use crate::net::peer_connection::Peer;
+    use crate::generate_peer_id;
 
     const PEER_ID_PREFIX: &'static str = "-RC0001-";
 
@@ -118,12 +124,6 @@ mod tests {
             Ok(_) => {}
             Err(e) => { println!("{:#?}", e) }
         }
-    }
-
-    fn generate_peer_id() -> String {
-        let mut rng = rand::thread_rng();
-        let rand_chars: String = rng.gen_ascii_chars().take(20 - PEER_ID_PREFIX.len()).collect();
-        format!("{}{}", PEER_ID_PREFIX, rand_chars)
     }
 
     #[test]

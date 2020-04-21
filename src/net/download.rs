@@ -2,7 +2,7 @@ use crate::base::meta_info::{TorrentMetaInfo, Info};
 use crate::net::ipc::IPC;
 use crate::bencode::hash::Sha1;
 use crate::net::request_metadata::RequestMetadata;
-use std::{convert, io};
+use std::{convert, io, fs};
 use async_std::sync::{Mutex, Arc, MutexGuard};
 use async_std::fs::{File, OpenOptions};
 use async_std::task;
@@ -153,15 +153,31 @@ impl Download {
                 }
             };
         }
+        println!("{}", file_infos.len());
 
         // create files and file_offsets
         let mut files = Vec::with_capacity(file_infos.len());
         let mut file_offsets = Vec::with_capacity(file_infos.len() + 1);
         let mut file_paths = Vec::with_capacity(file_infos.len());
         let mut file_offset = 0;
-        let _s: Result<(), Error> = task::block_on(async {
+
+        task::block_on(async move {
             for (length, file_path) in file_infos {
                 let path = Path::new(&file_path);
+                // create dirs
+                let t: Vec<&str>= file_path.split("/").collect();
+                if t.len() > 1 {
+                    let s = t[..t.len()-1].join("/");
+                    match fs::metadata(s.clone()) {
+                        Ok(_) => {},
+                        Err(_) => {
+                            println!("{}", s);
+                            fs::create_dir_all(s).unwrap()
+                        },
+                    }
+                }
+
+
                 let mut file = OpenOptions::new().create(true).read(true).write(true).open(path).await?;
 
                 files.push(Arc::new(Mutex::new(file)));
@@ -171,39 +187,43 @@ impl Download {
                 file_offset = file_offset + length;
             }
             file_offsets.push(file_offset);
-            Ok(())
-        });
-        let file_length = file_offset;
+
+            let file_length = file_offset;
+
+            println!("file_offsets {}", file_offsets.len());
+            println!("file_offsets: {:?}", file_offsets);
+            // create pieces
+            let piece_length = meta_info.piece_length();
+            let num_pieces = meta_info.num_pieces();
+
+            let mut pieces = Vec::with_capacity(num_pieces);
+
+            for i in 0..num_pieces {
+                let offset = i as u64 * piece_length as u64;
+                let length = if i < (num_pieces - 1) {
+                    piece_length
+                } else {
+                    (file_length - offset) as usize
+                };
+                let mut piece = Piece::new(length as u32, offset, meta_info.pieces()[i as usize].clone());
+
+                // piece.verify(&files, &file_offsets)?;
+                pieces.push(piece);
+            }
 
 
-        // create pieces
-        let piece_length = meta_info.piece_length();
-        let num_pieces = meta_info.num_pieces();
 
-        let mut pieces = Vec::with_capacity(num_pieces);
-
-        for i in 0..num_pieces {
-            let offset = i as u64 * piece_length as u64;
-            let length = if i < (num_pieces - 1) {
-                piece_length
-            } else {
-                (file_length - offset) as usize
-            };
-            let mut piece = Piece::new(length as u32, offset, meta_info.pieces()[i as usize].clone());
-
-            piece.verify(&files, &file_offsets)?;
-            pieces.push(piece);
-        }
-
-        Ok(Download {
-            our_peer_id,
-            meta_info,
-            pieces,
-            files,
-            file_paths,
-            peer_channels: Arc::new(Mutex::new(Vec::new())),
-            file_offsets,
+            Ok(Download {
+                our_peer_id,
+                meta_info,
+                pieces,
+                files,
+                file_paths,
+                peer_channels: Arc::new(Mutex::new(Vec::new())),
+                file_offsets,
+            })
         })
+
     }
 
     pub async fn store(&self, piece_index: u32, block_index: u32, data: Vec<u8>) -> Result<(), Error> {
@@ -332,6 +352,7 @@ impl Download {
     async fn broadcast(&self, ipc: IPC) {
         self.peer_channels.clone().lock().await.retain(|channel| {
             task::block_on(async {
+                // async_std::sync::Sender
                 match channel.send(ipc.clone()) {
                     Ok(_) => true,
                     Err(_) => false,
@@ -369,6 +390,7 @@ async fn store(mut file: MutexGuard<'_, File>,
 
 fn search_index(file_offsets: &[u64], offset: u64) -> usize {
     let len = file_offsets.len();
+    println!("search_index: {}", offset);
     let (mut left, mut right) = (0usize, len - 1);
 
     while left <= right {

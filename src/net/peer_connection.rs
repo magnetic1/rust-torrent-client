@@ -6,16 +6,17 @@ use async_std::net::TcpStream;
 use std::sync::mpsc::{Sender, RecvError, SendError, Receiver, channel};
 use crate::net::ipc::IPC;
 use std::collections::HashMap;
-use std::{convert, any, fmt};
+use std::{convert, any, fmt, thread};
 use crate::net::download;
 use async_std::io;
 use async_std::task;
 use crate::net::request_queue::RequestQueue;
 use rand::Rng;
 use async_std::sync::{Arc, Mutex};
-use futures::{FutureExt, AsyncReadExt};
+use futures::FutureExt;
 use futures::prelude::future::BoxFuture;
 use async_std::io::prelude::WriteExt;
+use async_std::prelude::*;
 
 const PROTOCOL: &'static str = "BitTorrent protocol";
 const MAX_CONCURRENT_REQUESTS: u32 = 10;
@@ -135,10 +136,32 @@ impl Message {
     }
 }
 
+pub async fn connect(peer: &Peer, download: Arc<Download>) -> Result<(), Error> {
+    PeerConnection::connect(peer, download).await
+}
+
+pub async fn accept(stream: TcpStream, download: Arc<Download>) -> Result<(), Error> {
+    PeerConnection::accept(stream, download).await
+}
+
+async fn recv<T: 'static + Send>(rx: Arc<Mutex<Receiver<T>>>) -> Result<T, Error> {
+    let rx = rx.clone();
+
+    let res = task::spawn_blocking(move || {
+        let rx_fut = rx.lock();
+        let r = task::block_on(async move {
+            rx_fut.await
+        });
+        r.recv()
+    }).await?;
+    Ok(res)
+}
+
 pub struct PeerConnection {
     halt: bool,
     download: Arc<Download>,
-    stream: Arc<Mutex<TcpStream>>,
+    stream_reader: Arc<Mutex<TcpStream>>,
+    stream_writer: Arc<Mutex<TcpStream>>,
     me: Arc<Mutex<PeerMetadata>>,
     them: Arc<Mutex<PeerMetadata>>,
     incoming_tx: Arc<Mutex<Sender<IPC>>>,
@@ -170,24 +193,35 @@ impl PeerConnection {
         println!("Connecting to {}:{}", peer.ip, peer.port);
         let ip: Ipv4Addr = peer.ip.parse().unwrap();
         let stream = TcpStream::connect((ip, peer.port)).await?;
-        PeerConnection::new(stream, download.clone(), true).await?;
+
+        let (mut conn, incoming_rx, outgoing_rx) =
+            PeerConnection::create(stream, download.clone()).await;
+
+        conn.run(true, incoming_rx, outgoing_rx).await?;
+
         println!("{}:{} Disconnected", &peer.ip, peer.port);
         Ok(())
     }
 
     async fn accept(stream: TcpStream, download: Arc<Download>) -> Result<(), Error> {
         println!("Received connection from a peer!");
-        PeerConnection::new(stream, download.clone(), false).await
+        let (mut conn, incoming_rx, outgoing_rx) =
+            PeerConnection::create(stream, download.clone()).await;
+
+        conn.run(false, incoming_rx, outgoing_rx).await?;
+        Ok(())
     }
 
-    async fn new(stream: TcpStream, download: Arc<Download>, send_handshake_first: bool) -> Result<(), Error> {
+    async fn create(stream: TcpStream, download: Arc<Download>)
+        -> (PeerConnection, Receiver<IPC>, Receiver<Message>) {
         let have_pieces = download.have_pieces().await;
 
         let num_pieces = have_pieces.len();
 
         // create & register incoming IPC channel with Download
         let (incoming_tx, incoming_rx) = channel::<IPC>();
-        download.register_peer(incoming_tx.clone()).await;
+        let tx = incoming_tx.clone();
+        download.register_peer(tx).await;
 
         // create outgoing Message channel
         let (outgoing_tx, outgoing_rx) = channel::<Message>();
@@ -195,7 +229,8 @@ impl PeerConnection {
         let mut conn = PeerConnection {
             halt: false,
             download,
-            stream: Arc::new(Mutex::new(stream)),
+            stream_reader: Arc::new(Mutex::new(stream.clone())),
+            stream_writer: Arc::new(Mutex::new(stream)),
             me: Arc::new(Mutex::new(PeerMetadata::new(have_pieces))),
             them: Arc::new(Mutex::new(PeerMetadata::new(vec![false; num_pieces]))),
             incoming_tx: Arc::new(Mutex::new(incoming_tx)),
@@ -204,12 +239,14 @@ impl PeerConnection {
             to_request: Arc::new(Mutex::new(HashMap::new())),
         };
 
-        conn.run(send_handshake_first, incoming_rx, outgoing_rx).await?;
+        // conn.run(send_handshake_first, incoming_rx, outgoing_rx).await?;
 
-        Ok(())
+        (conn, incoming_rx, outgoing_rx)
     }
 
-    async fn run(&mut self, send_handshake_first: bool, incoming_rx: Receiver<IPC>, outgoing_rx: Receiver<Message>) -> Result<(), Error> {
+    async fn run(&mut self, send_handshake_first: bool, incoming_rx: Receiver<IPC>,
+                 outgoing_rx: Receiver<Message>) -> Result<(), Error> {
+
         if send_handshake_first {
             self.send_handshake().await?;
             self.receive_handshake().await?;
@@ -222,7 +259,7 @@ impl PeerConnection {
 
         // spawn a thread to funnel incoming messages from the socket into the incoming message channel
         let downstream_funnel_task = {
-            let stream = self.stream.clone();
+            let stream = self.stream_reader.clone();
             let tx = self.incoming_tx.clone();
             task::spawn(async move {
                 DownLoadMessageFunnel::start(stream, tx).await
@@ -231,30 +268,41 @@ impl PeerConnection {
 
         // spawn a thread to funnel outgoing messages from the outgoing message channel into the socket
         let upstream_funnel_task = {
-            let stream = self.stream.clone();
+            let stream = self.stream_writer.clone();
             let tx = self.incoming_tx.clone();
             task::spawn(async move {
-                UpLoadMessageFunnel::start(stream, Arc::new(Mutex::new(outgoing_rx)), tx)
+                UpLoadMessageFunnel::start(stream, Arc::new(Mutex::new(outgoing_rx)), tx).await
             })
-            // task::spawn(async move {
-            //     UpLoadMessageFunnel::start(stream, outgoing_rx, tx).await
-            // })
         };
 
         // send a bitfield message letting peer know what we have
         self.send_bitfield().await?;
 
         // process messages received on the channel (both from the remote peer, and from Download)
+        let in_rx = Arc::new(Mutex::new(incoming_rx));
         while !self.halt {
-            // let message = task::spawn_blocking(|| {
-            let message =  incoming_rx.recv()?;
-            // }).await?;
-            self.process(message).await?;
+
+            // let rx = in_rx.clone();
+            let message = recv(in_rx.clone()).await?;
+
+            match message {
+                IPC::Message(Message::KeepAlive) => {},
+                _ => {
+                    println!("{:?} {:?}: incoming_rx receive: {:?}",
+                             task::current().id(), thread::current().id(), message);
+                    self.process(message).await?;
+                },
+            }
+            // println!("incoming_rx receive!!!!!!!!");
         }
 
         println!("Disconnecting");
-        self.stream.lock().await.shutdown(Shutdown::Both)?;
-        futures::join!(downstream_funnel_task, upstream_funnel_task);
+        self.stream_writer.lock().await.shutdown(Shutdown::Both)?;
+        let res = futures::join!(downstream_funnel_task, upstream_funnel_task);
+        // match res {
+        //     Ok(_) => {Ok(())},
+        //     Err(e) => Err(e),
+        // }
         Ok(())
     }
 
@@ -269,22 +317,25 @@ impl PeerConnection {
             message.extend(download.our_peer_id.bytes());
             message
         };
-        self.stream.lock().await.write_all(&message).await?;
+        self.stream_writer.lock().await.write_all(&message).await?;
         Ok(())
     }
 
     async fn receive_handshake(&self) -> Result<(), Error> {
-        let pstrlen = read_n(self.stream.clone(), 1).await?;
-        read_n(self.stream.clone(), pstrlen[0] as u32).await?; // ignore pstr
-        read_n(self.stream.clone(), 8).await?; // ignore reserved
-        let info_hash = read_n(self.stream.clone(), 20).await?;
-        let peer_id = read_n(self.stream.clone(), 20).await?;
-
+        let pstrlen = read_n(self.stream_reader.clone(), 1).await?;
+        read_n(self.stream_reader.clone(), pstrlen[0] as u32).await?; // ignore pstr
+        read_n(self.stream_reader.clone(), 8).await?; // ignore reserved
+        let info_hash = read_n(self.stream_reader.clone(), 20).await?;
+        let peer_id = read_n(self.stream_reader.clone(), 20).await?;
+        // println!("info_hash: {:?}", info_hash);
         {
             let download = self.download.clone();
 
             // validate info hash
             if &info_hash != &download.meta_info.info_hash().0 {
+                println!("{}", crate::bencode::hash::to_hex(&info_hash));
+                println!("{}", crate::bencode::hash::to_hex(&download.meta_info.info_hash().0));
+
                 return Err(Error::InvalidInfoHash);
             }
 
@@ -299,7 +350,7 @@ impl PeerConnection {
     }
 
     async fn send_message(&self, message: Message) -> Result<(), Error> {
-        // println!("Sending: {:?}", message);
+        println!("Sending: {:?}", message);
         self.outgoing_tx.clone().lock().await.send(message)?;
         Ok(())
     }
@@ -344,10 +395,15 @@ impl PeerConnection {
                 self.me.lock().await.is_choked = true;
             }
             Message::Unchoke => {
-                if self.me.lock().await.is_choked {
+                println!("{:?} {:?} start process_message(Unchoke)",
+                         task::current().id(), thread::current().id());
+                let is_choked = self.me.lock().await.is_choked;
+                if is_choked {
                     self.me.lock().await.is_choked = false;
                     self.request_more_blocks().await?;
                 }
+                println!("{:?} {:?} end process_message(Unchoke)",
+                         task::current().id(), thread::current().id());
             }
             Message::Interested => {
                 self.them.lock().await.is_interested = true;
@@ -363,19 +419,25 @@ impl PeerConnection {
                 self.request_more_blocks().await?;
             }
             Message::Bitfield(bytes) => {
-                for have_index in 0..self.them.lock().await.has_pieces.len() {
+                println!("{:?} {:?}: process Bitfield",
+                         task::current().id(), thread::current().id());
+                let l = self.them.lock().await.has_pieces.len();
+
+                for have_index in 0..l {
                     let bytes_index = have_index / 8;
                     let index_into_byte = have_index % 8;
                     let byte = bytes[bytes_index];
                     let mask = 1 << (7 - index_into_byte);
                     let value = (byte & mask) != 0;
                     self.them.lock().await.has_pieces[have_index] = value;
+
                     if value {
                         self.queue_blocks(have_index as u32).await;
                     }
                 };
                 self.update_my_interested_status().await?;
                 self.request_more_blocks().await?;
+                println!("Bitfield $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$");
             }
             Message::Request(piece_index, offset, length) => {
                 let block_index = offset / BLOCK_SIZE;
@@ -386,8 +448,14 @@ impl PeerConnection {
                 let block_index = offset / BLOCK_SIZE;
                 self.me.lock().await.requests.remove(piece_index, block_index);
                 {
+                    println!("{:?} {:?}: store block {} {} ",
+                             task::current().id(), thread::current().id(), piece_index, block_index);
+
                     let download = self.download.clone();
-                    download.store(piece_index, block_index, data).await?
+                    download.store(piece_index, block_index, data).await?;
+
+                    println!("{:?} {:?}: store block finished ",
+                             task::current().id(), thread::current().id());
                 }
                 self.update_my_interested_status().await?;
                 self.request_more_blocks().await?;
@@ -403,6 +471,9 @@ impl PeerConnection {
     }
 
     async fn queue_blocks(&self, piece_index: u32) {
+        // println!("{:?} {:?}: queue_blocks",
+        //          task::current().id(), thread::current().id());
+
         let incomplete_blocks = {
             let download = self.download.clone();
             download.incomplete_blocks_for_piece(piece_index).await
@@ -417,9 +488,13 @@ impl PeerConnection {
     }
 
     async fn update_my_interested_status(&self) -> Result<(), Error> {
-        let am_interested = self.me.lock().await.requests.len() > 0 || self.to_request.lock().await.len() > 0;
+        println!("{:?} {:?}: update_my_interested_status",
+                 task::current().id(), thread::current().id());
 
-        if self.me.lock().await.is_interested != am_interested {
+        let am_interested = self.me.lock().await.requests.len() > 0 || self.to_request.lock().await.len() > 0;
+        let is_interested = self.me.lock().await.is_interested;
+
+        if is_interested != am_interested {
             self.me.lock().await.is_interested = am_interested;
             let message = if am_interested {
                 Message::Interested
@@ -434,7 +509,11 @@ impl PeerConnection {
 
     async fn send_bitfield(&self) -> Result<(), Error> {
         let mut bytes: Vec<u8> = vec![0; (self.me.lock().await.has_pieces.len() as f64 / 8 as f64).ceil() as usize];
-        for have_index in 0..self.me.lock().await.has_pieces.len() {
+        println!("{:?} {:?}: start send_bitfield", task::current().id(), thread::current().id());
+        // todo:1 block here
+        // bytes = vec![0; self.me.lock().await.has_pieces.len()];
+        let l = self.me.lock().await.has_pieces.len();
+        for have_index in 0..l {
             let bytes_index = have_index / 8;
             let index_into_byte = have_index % 8;
             if self.me.lock().await.has_pieces[have_index] {
@@ -442,15 +521,25 @@ impl PeerConnection {
                 bytes[bytes_index] |= mask;
             }
         };
+        println!("{:?} {:?}: end send_bitfield", task::current().id(), thread::current().id());
         self.send_message(Message::Bitfield(bytes)).await
     }
 
     async fn request_more_blocks(&self) -> Result<(), Error> {
-        if self.me.lock().await.is_choked || !self.me.lock().await.is_interested || self.to_request.lock().await.len() == 0 {
+        println!("{:?} {:?}: request_more_blocks",
+                 task::current().id(), thread::current().id());
+
+        let is_choked = self.me.lock().await.is_choked;
+        let is_interested = self.me.lock().await.is_interested;
+        let len = self.to_request.lock().await.len();
+
+        if is_choked || !is_interested || len == 0 {
             return Ok(());
         }
 
-        while self.me.lock().await.requests.len() < MAX_CONCURRENT_REQUESTS as usize {
+        let mut req_len = self.me.lock().await.requests.len();
+        while req_len < MAX_CONCURRENT_REQUESTS as usize {
+
             let len = self.to_request.clone().lock().await.len();
 
             if len == 0 {
@@ -468,6 +557,8 @@ impl PeerConnection {
             if self.me.lock().await.requests.add(piece_index, block_index, offset, block_length) {
                 self.send_message(Message::Request(piece_index, offset, block_length)).await?;
             };
+
+            req_len = self.me.lock().await.requests.len();
         }
 
         Ok(())
@@ -521,14 +612,30 @@ impl DownLoadMessageFunnel {
     async fn run(&self) -> Result<(), Error> {
         loop {
             let message: Message = self.receive_message().await?;
-            self.tx.clone().lock().await.send(IPC::Message(message))?;
+
+            self.tx.clone().lock().await.send(IPC::Message(message.clone()))?;
+
+            match message {
+                Message::KeepAlive => {},
+                _ => {
+                    println!("{:?} {:?}: incoming sender have send message: {:?}",
+                             task::current().id(), thread::current().id(), message);
+                },
+            }
         }
     }
 
     async fn receive_message(&self) -> Result<Message, Error> {
         let message_size = bytes_to_u32(&read_n(self.stream.clone(), 4).await?);
         if message_size > 0 {
+            println!("{:?} {:?}: stream message len: {}",
+                     task::current().id(), thread::current().id(), message_size);
+
             let message = read_n(self.stream.clone(), message_size).await?;
+
+            // println!("{:?} {:?}: stream receive: {:?}",
+            //          task::current().id(), thread::current().id(), crate::bencode::hash::to_hex(&message));
+
             Ok(Message::new(&message[0], &message[1..]))
         } else {
             Ok(Message::KeepAlive)
@@ -560,22 +667,32 @@ impl UpLoadMessageFunnel {
     async fn run(&self) -> Result<(), Error> {
         loop {
             let rx = self.rx.clone();
-            let message = task::spawn_blocking(move || {
-                let rx_fut = rx.lock();
-                let r = task::block_on(async move {
-                    rx_fut.await
-                });
-                r.recv()
-            }).await?;
+            let message = recv(rx).await?;
 
             let is_block_upload = match message {
                 Message::Piece(_, _, _) => true,
                 _ => false
             };
 
+            // println!("{:?} {:?}: up load message: {:?}",
+            //          task::current().id(), thread::current().id(), message);
+
             // do a blocking write to the TCP stream
-            task::block_on(async {
-                self.stream.clone().lock().await.write_all(&message.serialize()).await
+            task::block_on(async move {
+                let s = message.clone();
+
+                let st = self.stream.clone();
+                let mut st = st.lock().await;
+
+                // println!("{:?} {:?}: up load locked: {:?}",
+                //          task::current().id(), thread::current().id(), message);
+                let res = st.write_all(&message.serialize()).await;
+                // let res = self.stream.clone().lock().await
+
+                println!("{:?} {:?}: outgoing reciever have recv message: {:?}",
+                         task::current().id(), thread::current().id(), s);
+
+                res
             })?;
 
             // notify the main PeerConnection thread that this block is finished
@@ -587,27 +704,37 @@ impl UpLoadMessageFunnel {
 }
 
 async fn read_n(stream: Arc<Mutex<TcpStream>>, bytes_to_read: u32) -> Result<Vec<u8>, Error> {
-    let mut buf = vec![];
-    read_n_to_buf(stream, &mut buf, bytes_to_read).await?;
+    let mut buf = vec![0; bytes_to_read as usize];
+    stream.lock().await.read_exact(&mut buf).await?;
+    // read_n_to_buf(stream, &mut buf, bytes_to_read).await?;
     Ok(buf)
 }
 
-fn read_n_to_buf(stream: Arc<Mutex<TcpStream>>, buf: &mut Vec<u8>, bytes_to_read: u32) -> BoxFuture<Result<(), Error>> {
-    async move {
-        if bytes_to_read == 0 {
-            return Ok(());
-        }
+// async fn read_n_to_buf(stream: Arc<Mutex<TcpStream>>,
+//                  buf: &mut Vec<u8>, bytes_to_read: u32) -> Result<(), Error> {
+//     if bytes_to_read == 0 {
+//         return Ok(());
+//     }
+//     let n = stream.lock().await.read(buf).await?;
+//     Ok(())
+// }
 
-        let mut take = stream.lock().await.clone().take(bytes_to_read as u64);
-        let bytes_read = take.read_to_end(buf).await;
-        match bytes_read {
-            Ok(0) => Err(Error::SocketClosed),
-            Ok(n) if n == bytes_to_read as usize => Ok(()),
-            Ok(n) => read_n_to_buf(stream.clone(), buf, bytes_to_read - n as u32).await,
-            Err(e) => Err(e)?
-        }
-    }.boxed()
-}
+// fn read_n_to_buf(stream: Arc<Mutex<TcpStream>>, buf: &mut Vec<u8>, bytes_to_read: u32) -> BoxFuture<Result<(), Error>> {
+//     async move {
+//         if bytes_to_read == 0 {
+//             return Ok(());
+//         }
+//
+//         let mut take = stream.lock().await.clone().take(bytes_to_read as u64);
+//         let bytes_read = take.read_to_end(buf).await;
+//         match bytes_read {
+//             // Ok(0) => Err(Error::SocketClosed),
+//             Ok(n) if n == bytes_to_read as usize => Ok(()),
+//             Ok(n) => read_n_to_buf(stream.clone(), buf, bytes_to_read - n as u32).await,
+//             Err(e) => Err(e)?
+//         }
+//     }.boxed()
+// }
 
 impl fmt::Debug for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -618,7 +745,7 @@ impl fmt::Debug for Message {
             Message::Interested => write!(f, "Interested"),
             Message::NotInterested => write!(f, "NotInterested"),
             Message::Have(ref index) => write!(f, "Have({})", index),
-            Message::Bitfield(ref bytes) => write!(f, "Bitfield({:?})", bytes),
+            Message::Bitfield(ref bytes) => write!(f, "Bitfield({:?})", crate::bencode::hash::to_hex(bytes)),
             Message::Request(ref index, ref offset, ref length) => write!(f, "Request({}, {}, {})", index, offset, length),
             Message::Piece(ref index, ref offset, ref data) => write!(f, "Piece({}, {}, size={})", index, offset, data.len()),
             Message::Cancel(ref index, ref offset, ref length) => write!(f, "Cancel({}, {}, {})", index, offset, length),
