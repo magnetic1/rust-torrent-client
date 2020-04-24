@@ -19,6 +19,7 @@ use crate::net::peer_connection::Peer;
 mod bencode;
 mod base;
 mod net;
+mod bt;
 
 
 const PEER_ID_PREFIX: &'static str = "-RC0001-";
