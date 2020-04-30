@@ -15,6 +15,7 @@ use futures::prelude::stream::FuturesUnordered;
 use async_std::prelude::Future;
 use futures::StreamExt;
 use crate::net::peer_connection::Peer;
+use crate::bt::ipc::IPC::Message;
 
 mod bencode;
 mod base;
@@ -103,7 +104,7 @@ async fn run(filename: &str, listener_port: u16) -> Result<(), Error> {
     });
     peers.push(Peer {
         ip: "104.152.209.30".to_string(),
-        port: 64223
+        port: 50779
     });
     peers.push(Peer {
         ip: "205.185.122.158".to_string(),
@@ -111,28 +112,29 @@ async fn run(filename: &str, listener_port: u16) -> Result<(), Error> {
     });
     println!("Found {} peers", peers.len());
 
+    let (tx_down, rx_down) = futures::channel::mpsc::unbounded();
     // create the download metadata object and stuff it inside a reference-counted mutex
-    let download = Download::new(our_peer_id, metainfo)?;
+    let download = Download::new(rx_down, our_peer_id, metainfo)?;
     let download = Arc::new(download);
 
-    // spawn thread to listen for incoming request
     let d = download.clone();
-
-
+    let t = tx_down.clone();
+    // spawn thread to listen for incoming request
     let listener_task = task::spawn(async move {
-        listener::start(listener_port, d).await;
+        listener::start(t, listener_port, d).await;
     });
 
     // spawn threads to connect to peers and start the download
     // let mut futs = FuturesUnordered::new();
     let mut peer_tasks: Vec<JoinHandle<()>> = Vec::new();
     for peer in peers {
-        let download = download.clone();
+        let d = download.clone();
+        let tx_d = tx_down.clone();
 
         let t = task::spawn(async move {
-            match peer_connection::connect(&peer, download).await {
+            match peer_connection::connect(tx_d, &peer, d.clone()).await {
                 Ok(_) => println!("Peer done"),
-                Err(e) => println!("peer connect Error: {:?}", e)
+                Err(e) => println!("peer {} connect Error: {:?}", &peer.ip, e)
             };
         });
         peer_tasks.push(t);
@@ -140,6 +142,9 @@ async fn run(filename: &str, listener_port: u16) -> Result<(), Error> {
 
     let t = task::spawn(async move {
         futures::future::join_all(peer_tasks).await;
+    });
+    task::spawn(async move {
+        download.run().await;
     });
     futures::join!(listener_task, t);
     // futs.push(listener_task);

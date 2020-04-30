@@ -11,6 +11,8 @@ use futures::pin_mut;
 use futures::future::FutureExt;
 use async_std::prelude::Future;
 use futures::prelude::future::Fuse;
+use futures::channel::mpsc::UnboundedSender;
+use crate::net::peer_connection::Message;
 
 async fn get_stream<'a>(mut incoming: Incoming<'a>) -> TcpStream {
     while let Some(stream) = incoming.next().await {
@@ -22,7 +24,7 @@ async fn get_stream<'a>(mut incoming: Incoming<'a>) -> TcpStream {
     panic!("TcpListener None stream ");
 }
 
-pub async fn start(port: u16, download: Arc<Download>) {
+pub async fn start(tx: UnboundedSender<Message>, port: u16, download: Arc<Download>) {
     println!("listener start!");
 
     let tcp_listener = TcpListener::bind(("0.0.0.0", port)).await.unwrap();
@@ -40,7 +42,7 @@ pub async fn start(port: u16, download: Arc<Download>) {
         select! {
             res = con_fut => {
                 handle_connection_futs.push(
-                    handle_connection(res, download.clone()).fuse()
+                    handle_connection(tx.clone(), res, download.clone()).fuse()
                 );
                 let mut incoming = tcp_listener.incoming();
                 con_fut.set(get_stream(incoming).fuse());
@@ -51,8 +53,8 @@ pub async fn start(port: u16, download: Arc<Download>) {
     };
 }
 
-async fn handle_connection(stream: TcpStream, download: Arc<Download>) {
-    match peer_connection::accept(stream, download).await {
+async fn handle_connection(tx: UnboundedSender<Message>, stream: TcpStream, download: Arc<Download>) {
+    match peer_connection::accept(tx, stream, download).await {
         Ok(_) => println!("Peer done"),
         Err(e) => println!("Error: {:?}", e)
     };

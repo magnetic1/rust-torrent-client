@@ -2,7 +2,7 @@ use crate::base::meta_info::{TorrentMetaInfo, Info};
 use crate::net::ipc::IPC;
 use crate::bencode::hash::Sha1;
 use crate::net::request_metadata::RequestMetadata;
-use std::{convert, io, fs};
+use std::{convert, io, fs, thread};
 use async_std::sync::{Mutex, Arc, MutexGuard};
 use async_std::fs::{File, OpenOptions};
 use async_std::task;
@@ -13,6 +13,10 @@ use futures::StreamExt;
 use async_std::path::{Path, PathBuf};
 use std::sync::mpsc::{Sender, SendError};
 
+use futures::channel::mpsc;
+use futures::channel::mpsc::UnboundedSender as TX;
+use futures::channel::mpsc::UnboundedReceiver as RX;
+use crate::net::peer_connection::Message;
 
 pub const BLOCK_SIZE: u32 = 16 * 1024;
 
@@ -25,6 +29,8 @@ pub struct Download {
     file_offsets: Vec<u64>,
     file_paths: Vec<String>,
     peer_channels: Arc<Mutex<Vec<Sender<IPC>>>>,
+
+    rx_down: Mutex<RX<Message>>,
 }
 
 struct Piece {
@@ -131,7 +137,7 @@ impl Piece {
 }
 
 impl Download {
-    pub fn new(our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<Download, Error> {
+    pub fn new(rx: RX<Message>, our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<Download, Error> {
         let mut file_infos = Vec::new();
         {
             match &meta_info.info {
@@ -179,6 +185,7 @@ impl Download {
 
 
                 let mut file = OpenOptions::new().create(true).read(true).write(true).open(path).await?;
+                file.set_len(length).await;
 
                 files.push(Arc::new(Mutex::new(file)));
                 file_offsets.push(file_offset);
@@ -221,9 +228,44 @@ impl Download {
                 file_paths,
                 peer_channels: Arc::new(Mutex::new(Vec::new())),
                 file_offsets,
+
+                rx_down: Mutex::new(rx),
             })
         })
 
+    }
+
+    pub async fn run(&self) {
+        use futures::{
+            future::{Fuse, FusedFuture},
+            stream::{FusedStream, FuturesUnordered, Stream, StreamExt},
+            pin_mut,
+            select,
+        };
+        let mut store_futs = FuturesUnordered::new();
+        let mut rx = self.rx_down.lock().await;
+
+        loop {
+            select! {
+                m = rx.next() => {
+                    match m {
+                        Some(message) => {
+                            match message {
+                                Message::Piece(piece_index, offset, data) => {
+                                    let block_index = offset / BLOCK_SIZE;
+                                    store_futs.push(self.store(piece_index, block_index, data).fuse());
+                                    println!("{:?} {:?}: store block {} {} ",
+                                             task::current().id(), thread::current().id(), piece_index, block_index);
+                                }
+                                _ => {},
+                            }
+                        },
+                        None => {break;},
+                    }
+                }
+                new_num = store_futs.select_next_some() => {},
+            }
+        }
     }
 
     pub async fn store(&self, piece_index: u32, block_index: u32, data: Vec<u8>) -> Result<(), Error> {
@@ -241,7 +283,7 @@ impl Download {
         piece.blocks[block_index as usize].clone().lock().await.is_complete = true;
 
         if piece.has_all_blocks() {
-            let valid = piece.verify(&self.files, &self.file_offsets)?;
+            let valid =  piece.verify(&self.files, &self.file_offsets)?;
             if !valid {
                 piece.reset_blocks();
             } else {
@@ -446,7 +488,7 @@ async fn read(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
     let (i, ptr_vec) =
         search_ptrs(file_offsets, offset, len as usize);
 
-    let mut buffer: Vec<u8> = Vec::with_capacity(len as usize);
+    let mut buffer: Vec<u8> = vec![0; len as usize];
 
     for (a, (piece_ptr, file_ptr, len)) in ptr_vec.into_iter().enumerate() {
         let file = files[i + a].clone();
@@ -454,6 +496,7 @@ async fn read(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
         // read in the part of the file corresponding to the piece
         file.seek(io::SeekFrom::Start(file_ptr as u64)).await?;
         // let mut handle = file.take(len);
+        println!("read file_ptr:{} piece_ptr:{} len:{}", file_ptr, piece_ptr, len);
         file.read(&mut buffer[piece_ptr..piece_ptr + len]).await?;
     }
     Ok(buffer)
@@ -475,10 +518,12 @@ impl convert::From<io::Error> for Error {
 #[cfg(test)]
 mod tests {
     use crate::net::download::search_ptrs;
-    use async_std::task;
+    use async_std::{task, io};
     use async_std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
+    use async_std::io::prelude::*;
+    use async_std::fs::OpenOptions;
 
     #[test]
     fn search_ptrs_test() {
@@ -521,6 +566,20 @@ mod tests {
 
         task::block_on(async move {
             futures::join!(task1, task2);
+        });
+    }
+
+    #[test]
+    fn read_test() {
+        task::block_on(async move {
+            let mut file = OpenOptions::new().create(true).read(true).write(true)
+                .open("read_test").await.unwrap();
+            let mut f = vec![1, 2, 3, 4, 5];
+            file.write_all(&f).await.unwrap();
+            let mut buf = [0; 2];
+            file.seek(io::SeekFrom::Start(2)).await.unwrap();
+            file.read(&mut buf).await.unwrap();
+            println!("{:?}", buf)
         });
     }
 }

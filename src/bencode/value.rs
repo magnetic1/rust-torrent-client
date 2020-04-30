@@ -248,7 +248,8 @@ fn from_value() {
 #[test]
 fn into_value() {
     let f = fs::read(
-        "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
+        // "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
+        r#"C:\Users\12287\Downloads\[桜都字幕组][碧蓝航线_Azur Lane][01-12 END][GB][1080P].torrent"#
     ).unwrap();
     let mut decoder = Decoder::new(f.as_slice());
 
@@ -260,7 +261,8 @@ fn into_value() {
         Ok(meta_info) => {
             if let Info::Multi(multi_info) = meta_info.info {
                 let v = multi_info.pieces.into_value();
-                println!("{}", v);
+                // println!("{}", v);
+                println!("{}", (multi_info.files[0].length / multi_info.piece_length as u64));
             };
         }
         Err(e) => println!("error: {}", e),

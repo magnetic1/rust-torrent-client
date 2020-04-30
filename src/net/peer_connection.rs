@@ -13,13 +13,17 @@ use async_std::task;
 use crate::net::request_queue::RequestQueue;
 use rand::Rng;
 use async_std::sync::{Arc, Mutex};
-use futures::FutureExt;
+use futures::{FutureExt, SinkExt};
 use futures::prelude::future::BoxFuture;
 use async_std::io::prelude::WriteExt;
 use async_std::prelude::*;
 
+use futures::channel::mpsc;
+use futures::channel::mpsc::UnboundedSender as TX;
+use futures::channel::mpsc::UnboundedReceiver as RX;
+
 const PROTOCOL: &'static str = "BitTorrent protocol";
-const MAX_CONCURRENT_REQUESTS: u32 = 10;
+const MAX_CONCURRENT_REQUESTS: u32 = 100;
 
 #[derive(PartialEq, Debug)]
 pub struct Peer {
@@ -136,12 +140,12 @@ impl Message {
     }
 }
 
-pub async fn connect(peer: &Peer, download: Arc<Download>) -> Result<(), Error> {
-    PeerConnection::connect(peer, download).await
+pub async fn connect(tx: TX<Message>, peer: &Peer, download: Arc<Download>) -> Result<(), Error> {
+    PeerConnection::connect(tx, peer, download).await
 }
 
-pub async fn accept(stream: TcpStream, download: Arc<Download>) -> Result<(), Error> {
-    PeerConnection::accept(stream, download).await
+pub async fn accept(tx: TX<Message>, stream: TcpStream, download: Arc<Download>) -> Result<(), Error> {
+    PeerConnection::accept(tx, stream, download).await
 }
 
 async fn recv<T: 'static + Send>(rx: Arc<Mutex<Receiver<T>>>) -> Result<T, Error> {
@@ -168,6 +172,8 @@ pub struct PeerConnection {
     outgoing_tx: Arc<Mutex<Sender<Message>>>,
     upload_in_progress: bool,
     to_request: Arc<Mutex<HashMap<(u32, u32), (u32, u32, u32)>>>,
+
+    tx_down: Mutex<TX<Message>>
 }
 
 struct PeerMetadata {
@@ -189,13 +195,13 @@ impl PeerMetadata {
 }
 
 impl PeerConnection {
-    async fn connect(peer: &Peer, download: Arc<Download>) -> Result<(), Error> {
+    async fn connect(tx: TX<Message> , peer: &Peer, download: Arc<Download>) -> Result<(), Error> {
         println!("Connecting to {}:{}", peer.ip, peer.port);
         let ip: Ipv4Addr = peer.ip.parse().unwrap();
         let stream = TcpStream::connect((ip, peer.port)).await?;
 
         let (mut conn, incoming_rx, outgoing_rx) =
-            PeerConnection::create(stream, download.clone()).await;
+            PeerConnection::create(tx, stream, download.clone()).await;
 
         conn.run(true, incoming_rx, outgoing_rx).await?;
 
@@ -203,16 +209,16 @@ impl PeerConnection {
         Ok(())
     }
 
-    async fn accept(stream: TcpStream, download: Arc<Download>) -> Result<(), Error> {
+    async fn accept(tx: TX<Message>, stream: TcpStream, download: Arc<Download>) -> Result<(), Error> {
         println!("Received connection from a peer!");
         let (mut conn, incoming_rx, outgoing_rx) =
-            PeerConnection::create(stream, download.clone()).await;
+            PeerConnection::create(tx, stream, download.clone()).await;
 
         conn.run(false, incoming_rx, outgoing_rx).await?;
         Ok(())
     }
 
-    async fn create(stream: TcpStream, download: Arc<Download>)
+    async fn create(tx_down: TX<Message>, stream: TcpStream, download: Arc<Download>)
         -> (PeerConnection, Receiver<IPC>, Receiver<Message>) {
         let have_pieces = download.have_pieces().await;
 
@@ -237,6 +243,8 @@ impl PeerConnection {
             outgoing_tx: Arc::new(Mutex::new(outgoing_tx)),
             upload_in_progress: false,
             to_request: Arc::new(Mutex::new(HashMap::new())),
+
+            tx_down: Mutex::new(tx_down),
         };
 
         // conn.run(send_handshake_first, incoming_rx, outgoing_rx).await?;
@@ -327,6 +335,7 @@ impl PeerConnection {
         read_n(self.stream_reader.clone(), 8).await?; // ignore reserved
         let info_hash = read_n(self.stream_reader.clone(), 20).await?;
         let peer_id = read_n(self.stream_reader.clone(), 20).await?;
+
         // println!("info_hash: {:?}", info_hash);
         {
             let download = self.download.clone();
@@ -423,7 +432,7 @@ impl PeerConnection {
                          task::current().id(), thread::current().id());
                 let l = self.them.lock().await.has_pieces.len();
 
-                for have_index in 0..l {
+                for have_index in 0..134 {
                     let bytes_index = have_index / 8;
                     let index_into_byte = have_index % 8;
                     let byte = bytes[bytes_index];
@@ -447,16 +456,20 @@ impl PeerConnection {
             Message::Piece(piece_index, offset, data) => {
                 let block_index = offset / BLOCK_SIZE;
                 self.me.lock().await.requests.remove(piece_index, block_index);
-                {
-                    println!("{:?} {:?}: store block {} {} ",
-                             task::current().id(), thread::current().id(), piece_index, block_index);
+                self.tx_down.lock().await.send(Message::Piece(piece_index, offset, data)).await.unwrap();
 
-                    let download = self.download.clone();
-                    download.store(piece_index, block_index, data).await?;
-
-                    println!("{:?} {:?}: store block finished ",
-                             task::current().id(), thread::current().id());
-                }
+                // let block_index = offset / BLOCK_SIZE;
+                // self.me.lock().await.requests.remove(piece_index, block_index);
+                // {
+                //     println!("{:?} {:?}: store block {} {} ",
+                //              task::current().id(), thread::current().id(), piece_index, block_index);
+                //
+                //     let download = self.download.clone();
+                //     download.store(piece_index, block_index, data).await?;
+                //
+                //     println!("{:?} {:?}: store block finished ",
+                //              task::current().id(), thread::current().id());
+                // }
                 self.update_my_interested_status().await?;
                 self.request_more_blocks().await?;
             }
