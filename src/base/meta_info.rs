@@ -1,9 +1,9 @@
 use std::time::Instant;
+use std::collections::BTreeMap;
 use crate::bencode::decode::{DecodeTo, Decoder, DecodeError};
 use crate::bencode::hash::Sha1;
 use crate::bencode::value::{FromValue, Value, IntoValue};
 use crate::base::meta_info::Info::{Single, Multi};
-use std::collections::BTreeMap;
 use crate::bencode::encode::{Encoder, EncodeTo};
 
 #[derive(Debug)]

@@ -1,21 +1,24 @@
-use std::{fs, convert, any, env, process};
 use crate::bencode::decode::{Decoder, DecodeTo, DecodeError};
 use crate::bencode::value::Value;
 use crate::net::{download, listener, peer_connection, tracker_connection};
 use crate::base::meta_info;
-use rand::Rng;
-use crate::net::download::Download;
-use async_std::sync::{Mutex, Arc};
-use async_std::task::JoinHandle;
-use async_std::task;
-use std::fs::File;
-use std::io::Read;
-use getopts::Options;
-use futures::prelude::stream::FuturesUnordered;
-use async_std::prelude::Future;
-use futures::StreamExt;
 use crate::net::peer_connection::Peer;
 use crate::bt::ipc::IPC::Message;
+use crate::net::download::Download;
+
+use std::fs::File;
+use std::io::Read;
+use std::{fs, convert, any, env, process};
+use async_std::sync::{Mutex, Arc};
+use async_std::prelude::Future;
+use async_std::task::JoinHandle;
+use async_std::task;
+
+use rand::Rng;
+use getopts::Options;
+use futures::prelude::stream::FuturesUnordered;
+use futures::StreamExt;
+
 
 mod bencode;
 mod base;
