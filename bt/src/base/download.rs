@@ -2,11 +2,12 @@ use crate::bencode::hash::Sha1;
 
 use async_std::fs::{File, OpenOptions};
 use async_std::io;
+use async_std::task;
 
 use futures::channel::mpsc;
 use futures::sink::SinkExt;
 use async_std::io::prelude::*;
-use async_std::sync::{Arc, Mutex};
+use async_std::sync::{Arc, Mutex, MutexGuard};
 use crate::base::ipc::Message;
 use crate::base::meta_info::{TorrentMetaInfo, Info};
 use async_std::path::Path;
@@ -79,23 +80,125 @@ impl Piece {
     }
 }
 
-pub async fn download_loop(rx: Receiver<Message>, our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
+pub struct Download {
+    pub our_peer_id: String,
+    pub meta_info: TorrentMetaInfo,
+    pieces: Vec<Piece>,
+    files: Vec<Arc<Mutex<File>>>,
+    file_offsets: Vec<u64>,
+    file_paths: Vec<String>,
+}
+
+impl Download {
+    pub(crate) async fn store(&mut self, piece_index: u32, block_index: u32, data: Vec<u8>) -> Result<()> {
+        let piece = &mut self.pieces[piece_index as usize];
+
+        if piece.has_block(block_index) || piece.is_complete {
+            // if we already have this block, do an early return to avoid re-writing the piece, sending complete messages, etc
+            return Ok(());
+        }
+
+        store_block(&self.files, &self.file_offsets, piece.offset, block_index, &data).await?;
+
+        piece.blocks[block_index as usize].is_complete = true;
+
+        if piece.has_all_blocks() {
+            let valid = verify(piece, &self.files, &self.file_offsets).await?;
+
+            if !valid {
+                piece.reset_blocks();
+            } else {
+                piece.is_complete = true;
+                // drop(piece);
+                // verify files. rename it if finished.
+                self.verify_file(piece_index).await?;
+            }
+        }
+
+        // // notify peers that this block is complete
+        // self.broadcast(IPC::BlockComplete(piece_index, block_index)).await;
+        //
+        // // notify peers if piece is complete
+        // if *piece.is_complete.clone().lock().await {
+        //     self.broadcast(IPC::PieceComplete(piece_index)).await;
+        // }
+        //
+        // // notify peers if download is complete
+        // if self.is_complete() {
+        //     println!("Download complete");
+        //     self.broadcast(IPC::DownloadComplete).await;
+        // }
+
+        Ok(())
+    }
+
+    pub(crate) async fn verify_file(&mut self, piece_index: u32) -> Result<()> {
+        let piece = &self.pieces[piece_index as usize];
+
+        let (index, v) = search_ptrs(&self.file_offsets, piece.offset, piece.length as usize);
+        let piece_len = self.meta_info.piece_length();
+
+        for i in 0..v.len() {
+            let name = &self.file_paths[i + index];
+
+            if name.ends_with(".temp") {
+                let low = self.file_offsets[i + index] as usize / piece_len;
+                let high = (self.file_offsets[i + index + 1] - 1) as usize / piece_len;
+
+                // let mut file_is_complete = true;
+                let contained_pieces = &self.pieces[low..=high];
+                let file_is_complete = contained_pieces.iter().all(|p| {
+                    p.is_complete
+                });
+
+                if file_is_complete {
+                    let new_name = &name[..name.len() - 5];
+                    async_std::fs::rename(name, new_name).await;
+
+                    let new_file = OpenOptions::new().create(true).read(true).write(true).open(new_name).await?;
+                    self.files[i + index] = Arc::new(Mutex::new(new_file));
+                    self.file_paths[i + index] = String::from(new_name);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub async fn download_loop(mut rx: Receiver<Message>, our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
-    let piece_len = meta_info.piece_length();
+
     let (file_offsets, file_paths, files)
         = download_inline::create_files(file_infos).await?;
 
     let len = file_offsets[file_offsets.len() - 1];
     let pieces = download_inline::create_pieces(len, &meta_info).await;
 
+    let mut download = Download {
+        our_peer_id,
+        meta_info,
+        pieces,
+        files,
+        file_offsets,
+        file_paths,
+    };
 
-    // let mut store_futs = FuturesUnordered::new();
-    let mut messages = rx.fuse();
+    while let Some(message) = rx.next().await {
+        match message {
+            Message::Piece(piece_index, offset, data) => {
+                let block_index = offset / BLOCK_SIZE;
+                download.store(piece_index, block_index, data).await?;
+                println!("{:?} {:?}: store block {}", task::current().id(), piece_index, block_index);
+            },
+            _ => {},
+        }
+    };
 
     Ok(())
 }
 
-async fn verify(piece: &mut Piece, files: &mut [Arc<Mutex<File>>], file_offsets: &[u64]) -> Result<bool> {
+async fn verify(piece: &mut Piece, files: &[Arc<Mutex<File>>], file_offsets: &[u64]) -> Result<bool> {
     let buffer = read(files, file_offsets, piece.offset, piece.length).await?;
 
     // calculate the hash, verify it, and update is_complete
@@ -129,7 +232,7 @@ async fn store(file: &mut File, file_ptr: u64,
     Ok(())
 }
 
-async fn read(files: &mut [Arc<Mutex<File>>], file_offsets: &[u64],
+async fn read(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
               offset: u64, len: u32) -> Result<Vec<u8>> {
     let (i, ptr_vec) =
         search_ptrs(file_offsets, offset, len as usize);
@@ -196,7 +299,7 @@ mod download_inline {
     use async_std::fs::{File, OpenOptions};
     use std::fs;
     use async_std::path::Path;
-    use crate::base::download::{Piece, store_block, search_ptrs};
+    use crate::base::download::{Piece, store_block, search_ptrs, verify};
     use crate::base::meta_info::{TorrentMetaInfo, Info};
 
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -283,83 +386,6 @@ mod download_inline {
         }
         pieces
     }
-
-    // pub(crate) async fn store(pieces: &mut [Piece], files: &[Arc<Mutex<File>>],
-    //                    file_offsets: &[u64], piece_index: u32,
-    //                    block_index: u32, data: Vec<u8>) -> Result<()> {
-    //     let piece = &mut pieces[piece_index as usize];
-    //
-    //     if piece.has_block(block_index) || piece.is_complete {
-    //         // if we already have this block, do an early return to avoid re-writing the piece, sending complete messages, etc
-    //         return Ok(());
-    //     }
-    //
-    //     store_block(files, file_offsets, piece.offset, block_index, &data).await?;
-    //
-    //
-    //     let mut piece = piece;
-    //     piece.blocks[block_index as usize].is_complete = true;
-    //
-    //     if piece.has_all_blocks() {
-    //         let valid =  piece.verify(&self.files, &self.file_offsets)?;
-    //         if !valid {
-    //             piece.reset_blocks();
-    //         } else {
-    //             // verify files. rename it if finished.
-    //             let (index, v)
-    //                 = search_ptrs(&self.file_offsets, piece.offset, piece.length as usize);
-    //             let piece_len = self.meta_info.piece_length();
-    //
-    //             for i in 0..v.len() {
-    //                 let name = &self.file_paths[i + index];
-    //
-    //                 if name.ends_with(".temp") {
-    //                     let low = file_offsets[i + index] as usize / piece_len;
-    //                     let high = (file_offsets[i + index + 1] - 1) as usize / piece_len;
-    //
-    //                     let mut file_is_complete = true;
-    //                     for p in low..=high {
-    //                         // let b = *self.pieces[p].is_complete.clone().lock().await;
-    //                         // if !b {
-    //                         //     file_is_complete = false;
-    //                         //     break;
-    //                         // }
-    //
-    //                         let b = match self.pieces[p].is_complete.try_lock() {
-    //                             Some(s) => {*s},
-    //                             None => { false },
-    //                         };
-    //
-    //                         if !b {
-    //                             file_is_complete = false;
-    //                             break;
-    //                         }
-    //                     };
-    //
-    //                     if file_is_complete {
-    //                         async_std::fs::rename(name, &name[..name.len() - 5]).await;
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    //
-    //     // notify peers that this block is complete
-    //     self.broadcast(IPC::BlockComplete(piece_index, block_index)).await;
-    //
-    //     // notify peers if piece is complete
-    //     if *piece.is_complete.clone().lock().await {
-    //         self.broadcast(IPC::PieceComplete(piece_index)).await;
-    //     }
-    //
-    //     // notify peers if download is complete
-    //     if self.is_complete() {
-    //         println!("Download complete");
-    //         self.broadcast(IPC::DownloadComplete).await;
-    //     }
-    //
-    //     Ok(())
-    // }
 }
 
 
