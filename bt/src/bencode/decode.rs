@@ -4,6 +4,7 @@ use core::fmt;
 use std::collections::BTreeMap;
 use crate::bencode::hash::Sha1;
 use crate::bencode::Integer;
+use std::error::Error;
 
 pub struct Decoder<'a> {
     data: Cursor<&'a [u8]>,
@@ -303,7 +304,7 @@ impl<'a> Decoder<'a> {
             let key = self.read_str()?;
 
             if name == key {
-                return DecodeTo::decode(self)
+                return DecodeTo::decode(self);
             } else if &key[..] < name {
                 // This key is less than name. name may be found later.
                 self.skip_item()?;
@@ -357,7 +358,7 @@ impl<'a> Decoder<'a> {
 
             if name == key {
                 let s: Vec<T> = DecodeTo::decode(self)?;
-                let _temp : Vec<()> = s.into_iter().map(|item| {
+                let _temp: Vec<()> = s.into_iter().map(|item| {
                     res.push(item);
                 }).collect();
                 pos = self.position();
@@ -434,5 +435,5 @@ macro_rules! impl_decodable_integer {
     }
 }
 
-impl_decodable_integer!{ u8 u16 u32 u64 usize i8 i16 i32 i64 isize }
+impl_decodable_integer! { u8 u16 u32 u64 usize i8 i16 i32 i64 isize }
 

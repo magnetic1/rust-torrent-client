@@ -14,12 +14,22 @@ use async_std::path::Path;
 use std::fs;
 use futures::prelude::stream::FuturesUnordered;
 use futures::StreamExt;
+use crate::base::manager::ManagerEvent;
+use futures::channel::mpsc::{Sender, Receiver};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-type Sender<T> = mpsc::UnboundedSender<T>;
-type Receiver<T> = mpsc::UnboundedReceiver<T>;
 
 pub const BLOCK_SIZE: u32 = 16 * 1024;
+
+macro_rules! require_buf1 {
+    ($sender:expr, $event:path) => {
+        {
+            let (mut sender, mut receiver) = mpsc::channel(1);
+            $sender.send($event(sender)).await?;
+            receiver.next().await.ok_or("ManagerEvent Require error")?
+        };
+    };
+}
 
 struct Block {
     index: u32,
@@ -87,6 +97,8 @@ pub struct Download {
     files: Vec<Arc<Mutex<File>>>,
     file_offsets: Vec<u64>,
     file_paths: Vec<String>,
+
+    manager_sender: Sender<ManagerEvent>,
 }
 
 impl Download {
@@ -132,11 +144,18 @@ impl Download {
         Ok(())
     }
 
-    pub(crate) async fn verify_file(&mut self, piece_index: u32) -> Result<()> {
+    pub(crate) async fn verify_file(&mut self, piece_index: u32, ) -> Result<()> {
         let piece = &self.pieces[piece_index as usize];
 
         let (index, v) = search_ptrs(&self.file_offsets, piece.offset, piece.length as usize);
-        let piece_len = self.meta_info.piece_length();
+
+        let piece_len = require_buf1!(self.manager_sender, ManagerEvent::RequirePieceLength);
+
+        // let piece_len = {
+        //     let (mut sender, mut receiver) = mpsc::channel(1);
+        //     self.manager_sender.send(ManagerEvent::RequirePieceLength(sender)).await?;
+        //     receiver.next().await.ok_or("ManagerEvent Require error")?
+        // };
 
         for i in 0..v.len() {
             let name = &self.file_paths[i + index];
@@ -153,7 +172,7 @@ impl Download {
 
                 if file_is_complete {
                     let new_name = &name[..name.len() - 5];
-                    async_std::fs::rename(name, new_name).await;
+                    async_std::fs::rename(name, new_name).await?;
 
                     let new_file = OpenOptions::new().create(true).read(true).write(true).open(new_name).await?;
                     self.files[i + index] = Arc::new(Mutex::new(new_file));
@@ -166,7 +185,7 @@ impl Download {
     }
 }
 
-pub async fn download_loop(mut rx: Receiver<Message>, our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
+pub async fn download_loop(mut rx: Receiver<Message>, mut manager_sender: Sender<ManagerEvent>,our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
 
     let (file_offsets, file_paths, files)
@@ -182,6 +201,7 @@ pub async fn download_loop(mut rx: Receiver<Message>, our_peer_id: String, meta_
         files,
         file_offsets,
         file_paths,
+        manager_sender,
     };
 
     while let Some(message) = rx.next().await {
@@ -387,6 +407,8 @@ mod download_inline {
         pieces
     }
 }
+
+
 
 
 

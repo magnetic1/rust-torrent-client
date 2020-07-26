@@ -1,3 +1,5 @@
+
+
 use async_std::{
     prelude::*,
     task,
@@ -7,9 +9,9 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>
 pub mod meta_info;
 pub mod ipc;
 pub mod download;
+pub mod manager;
 
-
-fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()>
+pub fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()>
     where
         F: Future<Output=Result<()>> + Send + 'static,
 {

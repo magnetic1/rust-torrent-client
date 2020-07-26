@@ -26,7 +26,7 @@ pub enum Message {
 }
 
 impl Message {
-    fn new(id: &u8, body: &[u8]) -> Message {
+    pub fn new(id: &u8, body: &[u8]) -> Message {
         match *id {
             0 => Message::Choke,
             1 => Message::Unchoke,
@@ -57,7 +57,7 @@ impl Message {
         }
     }
 
-    fn serialize(self) -> Vec<u8> {
+    pub fn serialize(self) -> Vec<u8> {
         let mut payload = vec![];
         match self {
             Message::KeepAlive => {}
@@ -106,14 +106,14 @@ const BYTE_1: u32 = 256 * 256;
 const BYTE_2: u32 = 256;
 const BYTE_3: u32 = 1;
 
-fn bytes_to_u32(bytes: &[u8]) -> u32 {
+pub(crate) fn bytes_to_u32(bytes: &[u8]) -> u32 {
     bytes[0] as u32 * BYTE_0 +
         bytes[1] as u32 * BYTE_1 +
         bytes[2] as u32 * BYTE_2 +
         bytes[3] as u32 * BYTE_3
 }
 
-fn u32_to_bytes(integer: u32) -> Vec<u8> {
+pub(crate) fn u32_to_bytes(integer: u32) -> Vec<u8> {
     let mut rest = integer;
     let first = rest / BYTE_0;
     rest -= first * BYTE_0;

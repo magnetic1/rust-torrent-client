@@ -26,7 +26,7 @@ mod net;
 mod bt;
 
 
-const PEER_ID_PREFIX: &'static str = "-RC0001-";
+pub const PEER_ID_PREFIX: &'static str = "-RC0001-";
 
 fn main() {
     // parse command-line arguments & options
