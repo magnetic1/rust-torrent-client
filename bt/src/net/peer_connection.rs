@@ -175,6 +175,39 @@ impl PeerConnection {
         };
         Ok(())
     }
+
+    async fn queue_blocks(&mut self, piece_index: u32) -> Result<()> {
+        let incomplete_blocks = {
+            let (sender, receiver) = futures::channel::oneshot::channel();
+            self.manager_sender.send(ManagerEvent::RequireIncompleteBlocks(piece_index, sender)).await?;
+            receiver.await?
+        };
+
+        for (block_index, block_length) in incomplete_blocks {
+            if !self.me.requests.has(piece_index, block_index) {
+                self.to_request.insert((piece_index, block_index),
+                                       (piece_index, block_index, block_length));
+            }
+        }
+        Ok(())
+    }
+
+    async fn update_my_interested_status(&mut self) -> Result<()> {
+        let am_interested = self.me.requests.len() > 0 || self.to_request.len() > 0;
+        let is_interested = self.me.is_interested;
+
+        if is_interested != am_interested {
+            self.me.is_interested = am_interested;
+            let message = if am_interested {
+                Message::Interested
+            } else {
+                Message::NotInterested
+            };
+            self.writer_sender.send(message).await?;
+        }
+        Ok(())
+    }
+
 }
 
 pub async fn peer_conn_loop(mut peer_conn: PeerConnection, mut download_sender: Sender<Message>) -> Result<()> {
@@ -194,8 +227,15 @@ pub async fn peer_conn_loop(mut peer_conn: PeerConnection, mut download_sender: 
 
     while let Some(ipc) = ipcs.next().await {
         match ipc {
-            IPC::Message(message) => {}
-            IPC::BlockComplete(_, _) => {}
+            IPC::Message(message) => process_message(&mut peer_conn, message).await?,
+            IPC::BlockComplete(piece_index, block_index) => {
+                peer_conn.to_request.remove(&(piece_index, block_index));
+                match peer_conn.me.requests.remove(piece_index, block_index) {
+                    Some(r) =>
+                        peer_conn.writer_sender.send(Message::Cancel(r.piece_index, r.offset, r.block_length)).await?,
+                    None => (),
+                }
+            }
             IPC::PieceComplete(_) => {}
             IPC::DownloadComplete => {}
             IPC::BlockUploaded => {}
@@ -279,13 +319,49 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
                 peer_conn.upload_next_block().await?;
             }
         }
-        Message::NotInterested => {}
-        Message::Have(_) => {}
-        Message::Bitfield(_) => {}
-        Message::Request(_, _, _) => {}
-        Message::Piece(_, _, _) => {}
-        Message::Cancel(_, _, _) => {}
-        Message::Port => {}
+        Message::NotInterested => {
+            peer_conn.he.is_interested = false;
+        }
+        Message::Have(have_index) => {
+            peer_conn.he.has_pieces[have_index as usize] = true;
+            peer_conn.queue_blocks(have_index).await?;
+            peer_conn.update_my_interested_status().await?;
+            peer_conn.request_more_blocks().await?;
+        }
+        Message::Bitfield(bytes) => {
+            let l = peer_conn.he.has_pieces.len();
+            for have_index in 0..l {
+                let bytes_index = have_index / 8;
+                let index_into_byte = have_index % 8;
+                let byte = bytes[bytes_index];
+                let mask = 1 << (7 - index_into_byte);
+                let value = (byte & mask) != 0;
+                peer_conn.he.has_pieces[have_index] = value;
+
+                if value {
+                    peer_conn.queue_blocks(have_index as u32).await?;
+                }
+            }
+            peer_conn.update_my_interested_status().await?;
+            peer_conn.request_more_blocks().await?;
+        }
+        Message::Request(piece_index, offset, length) => {
+            let block_index = offset / BLOCK_SIZE;
+            peer_conn.he.requests.add(piece_index, block_index, offset, length);
+            peer_conn.upload_next_block().await?;
+        }
+        Message::Piece(piece_index, offset, data) => {
+            let block_index = offset / BLOCK_SIZE;
+            peer_conn.me.requests.remove(piece_index, block_index);
+            peer_conn.manager_sender.send(ManagerEvent::Download(Message::Piece(piece_index, offset, data))).await?;
+            peer_conn.update_my_interested_status().await?;
+            peer_conn.request_more_blocks().await?;
+        }
+        Message::Cancel(piece_index, offset, _) => {
+            let block_index = offset / BLOCK_SIZE;
+            peer_conn.he.requests.remove(piece_index, block_index);
+        }
+        _ => return Err("Error UnknownRequestType(message)")?
     }
 
     Ok(())

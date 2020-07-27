@@ -24,13 +24,14 @@ pub async fn manager_loop(mut manager: Manager, mut rx: Receiver<Message>, our_p
 
     while let Some(e) = r.next().await {
         match e {
-            ManagerEvent::Download(Message) => {
+            ManagerEvent::Download(message) => {
 
-            },
+            }
             ManagerEvent::RequirePieceLength(mut sender) => {
                 sender.send(manager.meta_info.piece_length()).unwrap();
             }
             ManagerEvent::RequireData(_, _) => {}
+            ManagerEvent::RequireIncompleteBlocks(_, _) => {}
         }
     }
 
@@ -41,4 +42,5 @@ pub enum ManagerEvent{
     Download(Message),
     RequirePieceLength(futures::channel::oneshot::Sender<usize>),
     RequireData(RequestMetadata, futures::channel::oneshot::Sender<Vec<u8>>),
+    RequireIncompleteBlocks(u32, futures::channel::oneshot::Sender<Vec<(u32, u32)>>),
 }
