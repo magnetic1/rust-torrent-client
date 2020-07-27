@@ -6,6 +6,7 @@ use crate::base::ipc::Message;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::{StreamExt, SinkExt};
 use futures::channel::mpsc;
+use crate::net::peer_connection::RequestMetadata;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -27,15 +28,17 @@ pub async fn manager_loop(mut manager: Manager, mut rx: Receiver<Message>, our_p
 
             },
             ManagerEvent::RequirePieceLength(mut sender) => {
-                sender.send(manager.meta_info.piece_length()).await?;
+                sender.send(manager.meta_info.piece_length()).unwrap();
             }
+            ManagerEvent::RequireData(_, _) => {}
         }
     }
 
     Ok(())
 }
-#[derive(Clone)]
-pub enum ManagerEvent {
+
+pub enum ManagerEvent{
     Download(Message),
-    RequirePieceLength(Sender<usize>),
+    RequirePieceLength(futures::channel::oneshot::Sender<usize>),
+    RequireData(RequestMetadata, futures::channel::oneshot::Sender<Vec<u8>>),
 }

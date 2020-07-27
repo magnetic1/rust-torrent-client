@@ -1,5 +1,3 @@
-
-
 use async_std::{
     prelude::*,
     task,
@@ -20,4 +18,26 @@ pub fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()>
             eprintln!("{}", e)
         }
     })
+}
+
+#[macro_export]
+macro_rules! require_buf1 {
+    ($sender:expr, $event:path) => {
+        {
+            let (mut sender, mut receiver) = mpsc::channel(1);
+            $sender.send($event(sender)).await?;
+            receiver.next().await.ok_or("ManagerEvent Require error")?
+        };
+    };
+}
+
+#[macro_export]
+macro_rules! require_oneshot {
+    ($sender:expr, $event:path) => {
+        {
+            let (sender, receiver) = futures::channel::oneshot::channel();
+            $sender.send($event(sender)).await?;
+            receiver.await?
+        };
+    };
 }

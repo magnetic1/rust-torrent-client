@@ -10,6 +10,8 @@ use async_std::io::prelude::*;
 use async_std::sync::{Arc, Mutex, MutexGuard};
 use crate::base::ipc::Message;
 use crate::base::meta_info::{TorrentMetaInfo, Info};
+use crate::base::Result;
+use crate::require_oneshot;
 use async_std::path::Path;
 use std::fs;
 use futures::prelude::stream::FuturesUnordered;
@@ -17,19 +19,11 @@ use futures::StreamExt;
 use crate::base::manager::ManagerEvent;
 use futures::channel::mpsc::{Sender, Receiver};
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+// type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub const BLOCK_SIZE: u32 = 16 * 1024;
 
-macro_rules! require_buf1 {
-    ($sender:expr, $event:path) => {
-        {
-            let (mut sender, mut receiver) = mpsc::channel(1);
-            $sender.send($event(sender)).await?;
-            receiver.next().await.ok_or("ManagerEvent Require error")?
-        };
-    };
-}
+
 
 struct Block {
     index: u32,
@@ -149,7 +143,7 @@ impl Download {
 
         let (index, v) = search_ptrs(&self.file_offsets, piece.offset, piece.length as usize);
 
-        let piece_len = require_buf1!(self.manager_sender, ManagerEvent::RequirePieceLength);
+        let piece_len = require_oneshot!(self.manager_sender, ManagerEvent::RequirePieceLength);
 
         // let piece_len = {
         //     let (mut sender, mut receiver) = mpsc::channel(1);

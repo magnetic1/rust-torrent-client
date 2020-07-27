@@ -15,6 +15,9 @@ use crate::base::spawn_and_log_error;
 use crate::bencode::decode::DecodeError;
 use std::option::Option::Some;
 use std::collections::HashMap;
+use rand::Rng;
+use crate::base::download::BLOCK_SIZE;
+use crate::base::manager::ManagerEvent;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type Sender<T> = mpsc::Sender<T>;
@@ -57,7 +60,11 @@ pub struct PeerConnection {
     he: PeerMetadata,
 
     to_request: HashMap<(u32, u32), (u32, u32, u32)>,
+    writer_sender: Sender<Message>,
+    manager_sender: Sender<ManagerEvent>,
+    upload_in_progress: bool,
     // stream_sender: Arc<TcpStream>,
+
     // halt: bool,
     // download: Arc<Download>,
     //
@@ -117,6 +124,57 @@ impl PeerConnection {
 
         Ok(())
     }
+
+    async fn request_more_blocks(&mut self) -> Result<()> {
+        let is_choked = self.me.is_choked;
+        let is_interested = self.me.is_interested;
+        let len = self.to_request.len();
+
+        if is_choked || !is_interested || len == 0 {
+            return Ok(());
+        }
+
+        let mut req_len = self.me.requests.len();
+        while req_len < MAX_CONCURRENT_REQUESTS as usize {
+            let len = self.to_request.len();
+            if len == 0 {
+                return Ok(());
+            }
+            // remove a block at random from to_request
+            let (piece_index, block_index, block_length) = {
+                let index = rand::thread_rng().gen_range(0, len);
+                let target = self.to_request.keys().nth(index).unwrap().clone();
+                self.to_request.remove(&target).unwrap()
+            };
+            // add a request
+            let offset = block_index * BLOCK_SIZE;
+            if self.me.requests.add(piece_index, block_index, offset, block_length) {
+                self.writer_sender.send(Message::Request(piece_index, offset, block_length)).await?;
+            };
+            req_len = self.me.requests.len();
+        }
+        Ok(())
+    }
+
+    async fn upload_next_block(&mut self) -> Result<()> {
+        if self.upload_in_progress || self.he.is_choked || !self.he.is_interested {
+            return Ok(());
+        }
+
+        match self.he.requests.pop() {
+            Some(r) => {
+                let data = {
+                    let (sender, receiver) = futures::channel::oneshot::channel();
+                    self.manager_sender.send(ManagerEvent::RequireData(r.clone(), sender)).await?;
+                    receiver.await?
+                };
+                self.upload_in_progress = true;
+                self.writer_sender.send(Message::Piece(r.piece_index, r.offset, data)).await?
+            }
+            None => ()
+        };
+        Ok(())
+    }
 }
 
 pub async fn peer_conn_loop(mut peer_conn: PeerConnection, mut download_sender: Sender<Message>) -> Result<()> {
@@ -136,13 +194,11 @@ pub async fn peer_conn_loop(mut peer_conn: PeerConnection, mut download_sender: 
 
     while let Some(ipc) = ipcs.next().await {
         match ipc {
-            IPC::Message(message) => {
-
-            },
-            IPC::BlockComplete(_, _) => {},
-            IPC::PieceComplete(_) => {},
-            IPC::DownloadComplete => {},
-            IPC::BlockUploaded => {},
+            IPC::Message(message) => {}
+            IPC::BlockComplete(_, _) => {}
+            IPC::PieceComplete(_) => {}
+            IPC::DownloadComplete => {}
+            IPC::BlockUploaded => {}
         }
     }
 
@@ -174,38 +230,6 @@ async fn conn_read_loop(stream: Arc<TcpStream>, mut sender: Sender<IPC>) -> Resu
     Ok(())
 }
 
-async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Result<()> {
-    match message {
-        Message::KeepAlive => {},
-        Message::Choke => {
-            peer_conn.me.is_choked = true;
-        }
-        Message::Unchoke => {
-            let is_choked = peer_conn.me.is_choked;
-            if is_choked {
-                peer_conn.me.is_choked = false;
-                // peer_conn.request_more_blocks().await?;
-            }
-        }
-        Message::Interested => {}
-        Message::NotInterested => {}
-        Message::Have(_) => {}
-        Message::Bitfield(_) => {}
-        Message::Request(_, _, _) => {}
-        Message::Piece(_, _, _) => {}
-        Message::Cancel(_, _, _) => {}
-        Message::Port => {}
-    }
-
-    Ok(())
-}
-
-async fn request_more_blocks(peer_conn: &mut PeerConnection) {
-    let is_choked = peer_conn.me.is_choked;
-    let is_interested = peer_conn.me.is_interested;
-    let len = peer_conn.to_request.len();
-}
-
 async fn conn_write_loop(messages: &mut Receiver<Message>, stream: Arc<TcpStream>, mut sender: Sender<IPC>) -> Result<()> {
     let mut stream = &*stream;
     let mut messages = messages.fuse();
@@ -233,6 +257,39 @@ async fn conn_write_loop(messages: &mut Receiver<Message>, stream: Arc<TcpStream
     Ok(())
 }
 
+async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Result<()> {
+    match message {
+        Message::KeepAlive => {}
+        Message::Choke => {
+            peer_conn.me.is_choked = true;
+        }
+        Message::Unchoke => {
+            let is_choked = peer_conn.me.is_choked;
+            if is_choked {
+                peer_conn.me.is_choked = false;
+                peer_conn.request_more_blocks().await?;
+            }
+        }
+        Message::Interested => {
+            peer_conn.he.is_interested = true;
+            let is_choked = peer_conn.he.is_choked;
+            if is_choked {
+                peer_conn.he.is_choked = false;
+                peer_conn.writer_sender.send(Message::Unchoke).await?;
+                peer_conn.upload_next_block().await?;
+            }
+        }
+        Message::NotInterested => {}
+        Message::Have(_) => {}
+        Message::Bitfield(_) => {}
+        Message::Request(_, _, _) => {}
+        Message::Piece(_, _, _) => {}
+        Message::Cancel(_, _, _) => {}
+        Message::Port => {}
+    }
+
+    Ok(())
+}
 
 async fn read_n(mut stream: &TcpStream, bytes_to_read: u32) -> Result<Vec<u8>> {
     // let mut stream = &*stream;
@@ -302,7 +359,7 @@ impl RequestQueue {
             Some(i) => {
                 let r = self.requests.remove(i);
                 Some(r)
-            },
+            }
             None => None
         }
     }
@@ -316,7 +373,7 @@ impl RequestQueue {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RequestMetadata {
     pub piece_index: u32,
     pub block_index: u32,
