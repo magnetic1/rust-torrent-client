@@ -26,7 +26,7 @@ type Receiver<T> = mpsc::Receiver<T>;
 const PROTOCOL: &'static str = "BitTorrent protocol";
 const MAX_CONCURRENT_REQUESTS: u32 = 100;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Eq, Hash, Clone)]
 pub struct Peer {
     pub ip: String,
     pub port: u16,
@@ -51,18 +51,21 @@ impl FromValue for Peer {
 }
 
 pub struct PeerConnection {
+    halt: bool,
     our_peer_id: String,
     info_hash: Sha1,
-    send_handshake_first: bool,
+    // send_handshake_first: bool,
 
     stream: Arc<TcpStream>,
     me: PeerMetadata,
     he: PeerMetadata,
 
     to_request: HashMap<(u32, u32), (u32, u32, u32)>,
+    upload_in_progress: bool,
+
+
     writer_sender: Sender<Message>,
     manager_sender: Sender<ManagerEvent>,
-    upload_in_progress: bool,
     // stream_sender: Arc<TcpStream>,
 
     // halt: bool,
@@ -208,24 +211,77 @@ impl PeerConnection {
         Ok(())
     }
 
+    async fn send_bitfield(&mut self) -> Result<()> {
+        let mut bytes: Vec<u8> = vec![0; (self.me.has_pieces.len() as f64 / 8 as f64).ceil() as usize];
+        // todo:1 block here
+        // bytes = vec![0; self.me.lock().await.has_pieces.len()];
+        let l = self.me.has_pieces.len();
+        for have_index in 0..l {
+            let bytes_index = have_index / 8;
+            let index_into_byte = have_index % 8;
+            if self.me.has_pieces[have_index] {
+                let mask = 1 << (7 - index_into_byte);
+                bytes[bytes_index] |= mask;
+            }
+        };
+        println!("{:?}: send bitfield", task::current().id());
+        self.writer_sender.send(Message::Bitfield(bytes)).await?;
+        Ok(())
+    }
 }
 
-pub async fn peer_conn_loop(mut peer_conn: PeerConnection, mut download_sender: Sender<Message>) -> Result<()> {
-    if peer_conn.send_handshake_first {
+pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
+                            info_hash: Sha1, peer: Peer,
+                            mut ipc_sender: Sender<IPC>, mut ipcs: Receiver<IPC>,
+                            mut manager_sender: Sender<ManagerEvent>
+) -> Result<()> {
+
+    let have_pieces = {
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        manager_sender.send(ManagerEvent::RequireHavePieces(sender)).await?;
+        receiver.await?
+    };
+    let num_pieces = have_pieces.len();
+    let stream = {
+        let ip: Ipv4Addr = peer.ip.parse().unwrap();
+        Arc::new(TcpStream::connect((ip, peer.port)).await?)
+    };
+    // let (mut ipc_sender, mut ipcs) = mpsc::channel(10);
+    let (mut writer_sender ,mut writer_receiver) = mpsc::channel(10);
+    spawn_and_log_error(conn_read_loop(Arc::clone(&stream), ipc_sender.clone()));
+    spawn_and_log_error(conn_write_loop(writer_receiver, Arc::clone(&stream), ipc_sender));
+    let mut peer_conn = PeerConnection {
+        halt: false,
+        our_peer_id,
+        info_hash,
+        stream,
+        me: PeerMetadata::new(have_pieces),
+        he: PeerMetadata::new(vec![false; num_pieces]),
+        to_request: Default::default(),
+        upload_in_progress: false,
+        writer_sender,
+        manager_sender
+    };
+
+    if send_handshake_first {
         peer_conn.send_handshake().await?;
         peer_conn.receive_handshake().await?;
     } else {
         peer_conn.receive_handshake().await?;
         peer_conn.send_handshake().await?;
     }
+    // send a bitfield message letting peer know what we have
+    peer_conn.send_bitfield().await?;
 
-    let (mut ipc_sender, mut ipcs) = futures::channel::mpsc::channel(5);
+    while !peer_conn.halt {
+        let ipc = match ipcs.next().await {
+            Some(ipc) => ipc,
+            None => {
+                peer_conn.halt = true;
+                break;
+            },
+        };
 
-    spawn_and_log_error(
-        conn_read_loop(Arc::clone(&peer_conn.stream), ipc_sender.clone())
-    );
-
-    while let Some(ipc) = ipcs.next().await {
         match ipc {
             IPC::Message(message) => process_message(&mut peer_conn, message).await?,
             IPC::BlockComplete(piece_index, block_index) => {
@@ -236,11 +292,22 @@ pub async fn peer_conn_loop(mut peer_conn: PeerConnection, mut download_sender: 
                     None => (),
                 }
             }
-            IPC::PieceComplete(_) => {}
-            IPC::DownloadComplete => {}
-            IPC::BlockUploaded => {}
+            IPC::PieceComplete(piece_index) => {
+                peer_conn.me.has_pieces[piece_index as usize] = true;
+                peer_conn.update_my_interested_status().await?;
+                peer_conn.writer_sender.send(Message::Have(piece_index)).await?;
+            }
+            IPC::DownloadComplete => {
+                // peer_conn.halt = true;
+                peer_conn.update_my_interested_status().await?;
+            }
+            IPC::BlockUploaded => {
+                peer_conn.upload_in_progress = false;
+                peer_conn.upload_next_block().await?;
+            }
         }
-    }
+    };
+
 
     // let stream = Arc::new(stream);
     // let _handler = spawn_and_log_error(conn_write_loop())
@@ -270,7 +337,7 @@ async fn conn_read_loop(stream: Arc<TcpStream>, mut sender: Sender<IPC>) -> Resu
     Ok(())
 }
 
-async fn conn_write_loop(messages: &mut Receiver<Message>, stream: Arc<TcpStream>, mut sender: Sender<IPC>) -> Result<()> {
+async fn conn_write_loop(mut messages: Receiver<Message>, stream: Arc<TcpStream>, mut sender: Sender<IPC>) -> Result<()> {
     let mut stream = &*stream;
     let mut messages = messages.fuse();
 

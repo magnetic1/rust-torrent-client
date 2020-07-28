@@ -8,7 +8,7 @@ use futures::channel::mpsc;
 use futures::sink::SinkExt;
 use async_std::io::prelude::*;
 use async_std::sync::{Arc, Mutex, MutexGuard};
-use crate::base::ipc::Message;
+use crate::base::ipc::{Message, IPC};
 use crate::base::meta_info::{TorrentMetaInfo, Info};
 use crate::base::Result;
 use crate::require_oneshot;
@@ -18,11 +18,11 @@ use futures::prelude::stream::FuturesUnordered;
 use futures::StreamExt;
 use crate::base::manager::ManagerEvent;
 use futures::channel::mpsc::{Sender, Receiver};
+use crate::net::peer_connection::RequestMetadata;
 
 // type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub const BLOCK_SIZE: u32 = 16 * 1024;
-
 
 
 struct Block {
@@ -88,10 +88,9 @@ pub struct Download {
     pub our_peer_id: String,
     pub meta_info: TorrentMetaInfo,
     pieces: Vec<Piece>,
-    files: Vec<Arc<Mutex<File>>>,
+    files: Arc<Vec<Arc<Mutex<File>>>>,
     file_offsets: Vec<u64>,
-    file_paths: Vec<String>,
-
+    // file_paths: Vec<String>,
     manager_sender: Sender<ManagerEvent>,
 }
 
@@ -121,69 +120,115 @@ impl Download {
             }
         }
 
-        // // notify peers that this block is complete
-        // self.broadcast(IPC::BlockComplete(piece_index, block_index)).await;
-        //
-        // // notify peers if piece is complete
-        // if *piece.is_complete.clone().lock().await {
-        //     self.broadcast(IPC::PieceComplete(piece_index)).await;
-        // }
-        //
-        // // notify peers if download is complete
-        // if self.is_complete() {
-        //     println!("Download complete");
-        //     self.broadcast(IPC::DownloadComplete).await;
-        // }
+        // notify peers that this block is complete
+        self.broadcast(IPC::BlockComplete(piece_index, block_index)).await?;
+        // notify peers if piece is complete
+        if self.pieces[piece_index as usize].is_complete {
+            self.broadcast(IPC::PieceComplete(piece_index)).await;
+        }
+        // notify peers if download is complete
+        if self.is_complete() {
+            println!("Download complete");
+            self.broadcast(IPC::DownloadComplete).await;
+        }
 
         Ok(())
     }
 
-    pub(crate) async fn verify_file(&mut self, piece_index: u32, ) -> Result<()> {
+    pub(crate) async fn verify_file(&mut self, piece_index: u32) -> Result<()> {
         let piece = &self.pieces[piece_index as usize];
 
         let (index, v) = search_ptrs(&self.file_offsets, piece.offset, piece.length as usize);
 
         let piece_len = require_oneshot!(self.manager_sender, ManagerEvent::RequirePieceLength);
 
-        // let piece_len = {
-        //     let (mut sender, mut receiver) = mpsc::channel(1);
-        //     self.manager_sender.send(ManagerEvent::RequirePieceLength(sender)).await?;
-        //     receiver.next().await.ok_or("ManagerEvent Require error")?
-        // };
-
         for i in 0..v.len() {
-            let name = &self.file_paths[i + index];
+            let low = self.file_offsets[i + index] as usize / piece_len;
+            let high = (self.file_offsets[i + index + 1] - 1) as usize / piece_len;
 
-            if name.ends_with(".temp") {
-                let low = self.file_offsets[i + index] as usize / piece_len;
-                let high = (self.file_offsets[i + index + 1] - 1) as usize / piece_len;
+            // let mut file_is_complete = true;
+            let contained_pieces = &self.pieces[low..=high];
+            let file_is_complete = contained_pieces.iter().all(|p| {
+                p.is_complete
+            });
 
-                // let mut file_is_complete = true;
-                let contained_pieces = &self.pieces[low..=high];
-                let file_is_complete = contained_pieces.iter().all(|p| {
-                    p.is_complete
-                });
-
-                if file_is_complete {
-                    let new_name = &name[..name.len() - 5];
-                    async_std::fs::rename(name, new_name).await?;
-
-                    let new_file = OpenOptions::new().create(true).read(true).write(true).open(new_name).await?;
-                    self.files[i + index] = Arc::new(Mutex::new(new_file));
-                    self.file_paths[i + index] = String::from(new_name);
-                }
+            if file_is_complete {
+                self.manager_sender.send(ManagerEvent::FileFinish(i + index)).await?;
             }
+            // if name.ends_with(".temp") {
+            //     let low = self.file_offsets[i + index] as usize / piece_len;
+            //     let high = (self.file_offsets[i + index + 1] - 1) as usize / piece_len;
+            //
+            //     // let mut file_is_complete = true;
+            //     let contained_pieces = &self.pieces[low..=high];
+            //     let file_is_complete = contained_pieces.iter().all(|p| {
+            //         p.is_complete
+            //     });
+            //
+            //     if file_is_complete {
+            //         let new_name = &name[..name.len() - 5];
+            //         async_std::fs::rename(name, new_name).await?;
+            //
+            //         let new_file = OpenOptions::new().create(true).read(true).write(true).open(new_name).await?;
+            //         self.files[i + index] = Arc::new(Mutex::new(new_file));
+            //         self.file_paths[i + index] = String::from(new_name);
+            //     }
+            // }
         }
-
         Ok(())
+    }
+
+    pub(crate) async fn retrieve_data(&self, request: RequestMetadata) -> Result<Vec<u8>> {
+        let ref piece = self.pieces[request.piece_index as usize];
+
+        if piece.is_complete {
+            let offset = piece.offset + request.offset as u64;
+            let buf = read(&self.files, &self.file_offsets, offset, request.block_length).await?;
+            Ok(buf)
+        } else {
+            Err("Error::MissingPieceData")?
+        }
+    }
+
+    fn incomplete_blocks_for_piece(&self, piece_index: u32) -> Vec<(u32, u32)> {
+        let ref piece = self.pieces[piece_index as usize];
+        if !piece.is_complete {
+            piece.blocks.iter()
+                .filter(|&b| !b.is_complete)
+                .map(|b| (b.index, b.length))
+                .collect()
+        } else {
+            vec![]
+        }
+    }
+
+    fn is_complete(&self) -> bool {
+        self.pieces.iter().all(|piece| {
+            piece.is_complete
+        })
+    }
+
+    async fn broadcast(&mut self, ipc: IPC) -> Result<()> {
+        self.manager_sender.send(ManagerEvent::Broadcast(ipc)).await?;
+        Ok(())
+    }
+
+    pub fn have_pieces(&self) -> Vec<bool> {
+        let mut res = Vec::with_capacity(self.pieces.len());
+        for p in &self.pieces {
+            res.push(p.is_complete);
+        }
+        res
     }
 }
 
-pub async fn download_loop(mut rx: Receiver<Message>, mut manager_sender: Sender<ManagerEvent>,our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
+pub async fn download_loop(mut rx: Receiver<ManagerEvent>, mut manager_sender: Sender<ManagerEvent>,
+                           files: Arc<Vec<Arc<Mutex<File>>>>, file_offsets: Vec<u64>,
+                           our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
 
-    let (file_offsets, file_paths, files)
-        = download_inline::create_files(file_infos).await?;
+    // let (file_offsets, file_paths, files)
+    //     = download_inline::create_files(file_infos).await?;
 
     let len = file_offsets[file_offsets.len() - 1];
     let pieces = download_inline::create_pieces(len, &meta_info).await;
@@ -194,18 +239,29 @@ pub async fn download_loop(mut rx: Receiver<Message>, mut manager_sender: Sender
         pieces,
         files,
         file_offsets,
-        file_paths,
         manager_sender,
     };
 
-    while let Some(message) = rx.next().await {
-        match message {
-            Message::Piece(piece_index, offset, data) => {
+    while let Some(event) = rx.next().await {
+        match event {
+            ManagerEvent::Download(Message::Piece(piece_index, offset, data)) => {
                 let block_index = offset / BLOCK_SIZE;
                 download.store(piece_index, block_index, data).await?;
                 println!("{:?} {:?}: store block {}", task::current().id(), piece_index, block_index);
-            },
-            _ => {},
+            }
+            ManagerEvent::RequireData(request_data, sender) => {
+                let buf = download.retrieve_data(request_data).await?;
+                sender.send(buf).unwrap();
+            }
+            ManagerEvent::RequireIncompleteBlocks(piece_index, sender) => {
+                let res = download.incomplete_blocks_for_piece(piece_index);
+                sender.send(res).unwrap();
+            }
+            ManagerEvent::RequireHavePieces(sender) => {
+                let have_pieces = download.have_pieces();
+                sender.send(have_pieces).unwrap();
+            }
+            _ => {}
         }
     };
 
@@ -308,7 +364,7 @@ fn search_ptrs(file_offsets: &[u64], offset: u64, len: usize) -> (usize, Vec<(us
 }
 
 
-mod download_inline {
+pub mod download_inline {
     use async_std::sync::{Arc, Mutex};
     use async_std::fs::{File, OpenOptions};
     use std::fs;

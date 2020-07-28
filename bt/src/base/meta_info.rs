@@ -6,7 +6,7 @@ use crate::bencode::value::{FromValue, Value, IntoValue};
 use crate::base::meta_info::Info::{Single, Multi};
 use crate::bencode::encode::{Encoder, EncodeTo};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TorrentMetaInfo {
     pub info: Info,
     pub announce: Option<String>,

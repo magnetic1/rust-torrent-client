@@ -1,12 +1,14 @@
 use crate::base::meta_info::TorrentMetaInfo;
-use crate::base::download::Piece;
+use crate::base::download::{Piece, download_loop, download_inline};
 use async_std::sync::{Arc, Mutex};
-use async_std::fs::File;
-use crate::base::ipc::Message;
+use async_std::fs::{File, OpenOptions};
+use crate::base::ipc::{Message, IPC};
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::{StreamExt, SinkExt};
 use futures::channel::mpsc;
-use crate::net::peer_connection::RequestMetadata;
+use crate::net::peer_connection::{RequestMetadata, Peer, peer_conn_loop};
+use crate::base::spawn_and_log_error;
+use std::collections::HashMap;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -14,33 +16,99 @@ pub struct Manager {
     our_peer_id: String,
     meta_info: TorrentMetaInfo,
     pieces: Vec<Piece>,
-    files: Vec<Arc<Mutex<File>>>,
+    files: Arc<Vec<Arc<Mutex<File>>>>,
     file_offsets: Vec<u64>,
     file_paths: Vec<String>,
 }
 
-pub async fn manager_loop(mut manager: Manager, mut rx: Receiver<Message>, our_peer_id: String) -> Result<()> {
-    let (s, mut r): (Sender<ManagerEvent>, Receiver<ManagerEvent>) = mpsc::channel(10);
+pub async fn manager_loop(mut manager: Manager, our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
+    let (mut sender, mut client_receiver) = mpsc::channel(10);
+    let (mut client_sender, mut events) = mpsc::channel(10);
+    let mut peers: HashMap<Peer, Sender<IPC>> = HashMap::new();
 
-    while let Some(e) = r.next().await {
-        match e {
-            ManagerEvent::Download(message) => {
+    let file_infos = download_inline::create_file_infos(&meta_info.info).await;
+    let (file_offsets, file_paths, files)
+        = download_inline::create_files(file_infos).await?;
+    let len = file_offsets[file_offsets.len() - 1];
+    let pieces = download_inline::create_pieces(len, &meta_info).await;
 
+    let mut manager = Manager {
+        our_peer_id: our_peer_id.clone(),
+        meta_info,
+        pieces,
+        files: Arc::new(files),
+        file_offsets,
+        file_paths,
+    };
+
+    let _down_handle = spawn_and_log_error(
+        download_loop(client_receiver, client_sender.clone(),
+                      Arc::clone(&manager.files), manager.file_offsets.clone(),
+                      manager.our_peer_id.clone(), manager.meta_info.clone())
+    );
+
+    while let Some(event) = events.next().await {
+        match event {
+            ManagerEvent::Broadcast(ipc) => {
+                peers.retain(|peer, sender| {
+                    async_std::task::block_on(async {
+                        match sender.send(ipc.clone()).await {
+                            Ok(_) => true,
+                            Err(_) => false,
+                        }
+                    })
+                });
             }
+            ManagerEvent::Connection(send_handshake_first, peer) => {
+                if peers.get(&peer).is_none() {
+                    let (peer_sender, peer_receiver) = mpsc::channel(10);
+                    spawn_and_log_error(
+                        peer_conn_loop(send_handshake_first, our_peer_id.clone(),
+                                       manager.meta_info.info_hash(), peer.clone(), peer_sender.clone(),
+                                       peer_receiver, client_sender.clone())
+                    );
+                    assert!(peers.insert(peer, peer_sender.clone()).is_none());
+                }
+            }
+
             ManagerEvent::RequirePieceLength(mut sender) => {
                 sender.send(manager.meta_info.piece_length()).unwrap();
             }
-            ManagerEvent::RequireData(_, _) => {}
-            ManagerEvent::RequireIncompleteBlocks(_, _) => {}
+            ManagerEvent::FileFinish(file_index) => {
+                let name = &manager.file_paths[file_index];
+                if name.ends_with(".temp") {
+                    let new_name = &name[..name.len() - 5];
+                    async_std::fs::rename(name, new_name).await?;
+                    let new_file = OpenOptions::new().create(true).read(true).write(true).open(new_name).await?;
+                    let mut file = manager.files[file_index].lock().await;
+                    *file = new_file;
+                     // = Arc::new(Mutex::new(new_file));
+                    manager.file_paths[file_index] = String::from(new_name);
+                }
+            }
+
+            e => sender.send(e).await?,
+
+            // ManagerEvent::RequireData(_, _) => {}
+            // ManagerEvent::RequireIncompleteBlocks(_, _) => {}
+            // ManagerEvent::Download(message) => {
+            // }
+            // ManagerEvent::RequireHavePieces(_) => {}
         }
     }
 
     Ok(())
 }
 
-pub enum ManagerEvent{
-    Download(Message),
+pub enum ManagerEvent {
+    Broadcast(IPC),
+    Connection(bool, Peer),
+
     RequirePieceLength(futures::channel::oneshot::Sender<usize>),
+    FileFinish(usize),
+
+    Download(Message),
     RequireData(RequestMetadata, futures::channel::oneshot::Sender<Vec<u8>>),
     RequireIncompleteBlocks(u32, futures::channel::oneshot::Sender<Vec<(u32, u32)>>),
+    RequireHavePieces(futures::channel::oneshot::Sender<Vec<bool>>),
 }
