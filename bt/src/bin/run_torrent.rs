@@ -1,0 +1,24 @@
+use std::fs::File;
+use std::io::Read;
+use bt::base::meta_info::TorrentMetaInfo;
+use async_std::task;
+use rand::Rng;
+use bt::base::manager::manager_loop;
+
+pub const PEER_ID_PREFIX: &'static str = "-RC0001-";
+
+fn main() {
+    let filename = r#"C:\Users\12287\Downloads\fb937c7a06bf333b50b446612b785e96047af5e6.torrent"#;
+    let mut bytes = Vec::new();
+    File::open(filename).unwrap().read_to_end(&mut bytes).unwrap();
+    let metainfo = TorrentMetaInfo::parse(&bytes);
+
+    let mut rng = rand::thread_rng();
+    let rand_chars: String = rng.gen_ascii_chars().take(20 - PEER_ID_PREFIX.len()).collect();
+    let peer_id = format!("{}{}", PEER_ID_PREFIX, rand_chars);
+
+    println!("start manager_loop");
+    task::block_on(async {
+        manager_loop(peer_id, metainfo).await;
+    })
+}

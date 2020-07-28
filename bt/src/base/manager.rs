@@ -21,16 +21,19 @@ pub struct Manager {
     file_paths: Vec<String>,
 }
 
-pub async fn manager_loop(mut manager: Manager, our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
+pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
     let (mut sender, mut client_receiver) = mpsc::channel(10);
     let (mut client_sender, mut events) = mpsc::channel(10);
     let mut peers: HashMap<Peer, Sender<IPC>> = HashMap::new();
 
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
+    println!("create_file_infos finished");
     let (file_offsets, file_paths, files)
         = download_inline::create_files(file_infos).await?;
+    println!("create_files finished");
     let len = file_offsets[file_offsets.len() - 1];
     let pieces = download_inline::create_pieces(len, &meta_info).await;
+    println!("create_pieces finished");
 
     let mut manager = Manager {
         our_peer_id: our_peer_id.clone(),
@@ -46,6 +49,26 @@ pub async fn manager_loop(mut manager: Manager, our_peer_id: String, meta_info: 
                       Arc::clone(&manager.files), manager.file_offsets.clone(),
                       manager.our_peer_id.clone(), manager.meta_info.clone())
     );
+
+    {
+        let mut ps = Vec::new();
+        ps.push(Peer {
+            ip: "223.159.33.171".to_string(),
+            port: 23568
+        });
+        // ps.push(Peer {
+        //     ip: "104.152.209.30".to_string(),
+        //     port: 50779
+        // });
+        // ps.push(Peer {
+        //     ip: "205.185.122.158".to_string(),
+        //     port: 54794
+        // });
+        for p in ps {
+            client_sender.send(ManagerEvent::Connection(true, p)).await?;
+        }
+    }
+
 
     while let Some(event) = events.next().await {
         match event {

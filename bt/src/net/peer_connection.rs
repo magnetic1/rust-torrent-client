@@ -102,7 +102,9 @@ impl PeerConnection {
     async fn receive_handshake(&self) -> Result<()> {
         let stream = &*self.stream;
 
+        // println!("{}: peer_conn_loop",task::current().id(),);
         let pstrlen = read_n(stream, 1).await?;
+
         read_n(stream, pstrlen[0] as u32).await?; // ignore pstr
         read_n(stream, 8).await?; // ignore reserved
         let info_hash = read_n(stream, 20).await?;
@@ -248,8 +250,7 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
     };
     // let (mut ipc_sender, mut ipcs) = mpsc::channel(10);
     let (mut writer_sender ,mut writer_receiver) = mpsc::channel(10);
-    spawn_and_log_error(conn_read_loop(Arc::clone(&stream), ipc_sender.clone()));
-    spawn_and_log_error(conn_write_loop(writer_receiver, Arc::clone(&stream), ipc_sender));
+
     let mut peer_conn = PeerConnection {
         halt: false,
         our_peer_id,
@@ -270,6 +271,10 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
         peer_conn.receive_handshake().await?;
         peer_conn.send_handshake().await?;
     }
+
+
+    spawn_and_log_error(conn_read_loop(Arc::clone(&peer_conn.stream), ipc_sender.clone()));
+    spawn_and_log_error(conn_write_loop(writer_receiver, Arc::clone(&peer_conn.stream), ipc_sender));
     // send a bitfield message letting peer know what we have
     peer_conn.send_bitfield().await?;
 
@@ -296,6 +301,7 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
                 peer_conn.me.has_pieces[piece_index as usize] = true;
                 peer_conn.update_my_interested_status().await?;
                 peer_conn.writer_sender.send(Message::Have(piece_index)).await?;
+
             }
             IPC::DownloadComplete => {
                 // peer_conn.halt = true;
@@ -323,7 +329,7 @@ async fn conn_read_loop(stream: Arc<TcpStream>, mut sender: Sender<IPC>) -> Resu
 
     while let message_size = bytes_to_u32(&read_n(stream, 4).await?) {
         let message = if message_size > 0 {
-            println!("{:?}: stream message len: {}", task::current().id(), message_size);
+            // println!("{:?}: stream message len: {}", task::current().id(), message_size);
 
             let message = read_n(stream, message_size).await?;
             Message::new(&message[0], &message[1..])
@@ -350,7 +356,7 @@ async fn conn_write_loop(mut messages: Receiver<Message>, stream: Arc<TcpStream>
                         _ => false
                     };
                     stream.write_all(&message.clone().serialize()).await?;
-                    println!("{:?}: outgoing reciever have recv message: {:?}", task::current().id(), message);
+                    // println!("{:?}: outgoing reciever have recv message: {:?}", task::current().id(), message);
 
                     // notify the main PeerConnection thread that this block is finished
                     if is_block_upload {
