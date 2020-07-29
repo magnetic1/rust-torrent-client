@@ -2,7 +2,7 @@ use async_std::{
     prelude::*,
     task,
 };
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub mod meta_info;
 pub mod ipc;

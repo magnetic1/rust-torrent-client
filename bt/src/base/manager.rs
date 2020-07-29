@@ -1,13 +1,20 @@
-use crate::base::meta_info::TorrentMetaInfo;
-use crate::base::download::{Piece, download_loop, download_inline};
-use async_std::sync::{Arc, Mutex};
-use async_std::fs::{File, OpenOptions};
-use crate::base::ipc::{Message, IPC};
-use futures::channel::mpsc::{Receiver, Sender};
-use futures::{StreamExt, SinkExt};
-use futures::channel::mpsc;
-use crate::net::peer_connection::{RequestMetadata, Peer, peer_conn_loop};
-use crate::base::spawn_and_log_error;
+use async_std::{
+    sync::{Arc, Mutex},
+    fs::{File, OpenOptions}
+};
+use futures::{
+    StreamExt,
+    SinkExt,
+    channel::mpsc,
+    channel::mpsc::{Receiver, Sender},
+};
+use crate::{
+    net::peer_connection::{RequestMetadata, Peer, peer_conn_loop},
+    base::ipc::{Message, IPC},
+    base::download::{Piece, download_loop, download_inline},
+    base::meta_info::TorrentMetaInfo,
+    base::spawn_and_log_error
+};
 use std::collections::HashMap;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;

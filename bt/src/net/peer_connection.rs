@@ -1,27 +1,35 @@
-use futures::channel::mpsc;
-use futures::sink::SinkExt;
-use futures::{select, FutureExt, StreamExt};
-use async_std::task;
-use async_std::sync::Arc;
-use async_std::prelude::*;
-use async_std::net::TcpStream;
-use async_std::net::Ipv4Addr;
-
-use crate::base::ipc::{Message, IPC, bytes_to_u32};
-use crate::base::meta_info::TorrentMetaInfo;
-use crate::bencode::hash::Sha1;
-use crate::bencode::value::{FromValue, Value};
-use crate::base::spawn_and_log_error;
-use crate::bencode::decode::DecodeError;
+use async_std::{
+    task,
+    sync::Arc,
+    prelude::*,
+    net::TcpStream,
+    net::Ipv4Addr
+};
+use crate::{
+    base::{
+        ipc::{Message, IPC, bytes_to_u32},
+        meta_info::TorrentMetaInfo,
+        spawn_and_log_error,
+        download::BLOCK_SIZE,
+        manager::ManagerEvent,
+        Result
+    },
+    bencode::{
+        hash::Sha1,
+        value::{FromValue, Value},
+        decode::DecodeError
+    },
+};
+use futures::{
+    select,
+    FutureExt,
+    StreamExt,
+    sink::SinkExt,
+    channel::mpsc::{self, Sender, Receiver},
+};
+use rand::Rng;
 use std::option::Option::Some;
 use std::collections::{HashMap, BTreeMap};
-use rand::Rng;
-use crate::base::download::BLOCK_SIZE;
-use crate::base::manager::ManagerEvent;
-
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-type Sender<T> = mpsc::Sender<T>;
-type Receiver<T> = mpsc::Receiver<T>;
 
 const PROTOCOL: &'static str = "BitTorrent protocol";
 const MAX_CONCURRENT_REQUESTS: u32 = 100;

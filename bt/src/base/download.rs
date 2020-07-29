@@ -1,26 +1,32 @@
-use crate::bencode::hash::Sha1;
-
-use async_std::fs::{File, OpenOptions};
-use async_std::io;
-use async_std::task;
-
-use futures::channel::mpsc;
-use futures::sink::SinkExt;
-use async_std::io::prelude::*;
-use async_std::sync::{Arc, Mutex, MutexGuard};
-use crate::base::ipc::{Message, IPC};
-use crate::base::meta_info::{TorrentMetaInfo, Info};
-use crate::base::Result;
-use crate::require_oneshot;
-use async_std::path::Path;
 use std::fs;
-use futures::prelude::stream::FuturesUnordered;
-use futures::{StreamExt, AsyncWriteExt};
-use crate::base::manager::ManagerEvent;
-use futures::channel::mpsc::{Sender, Receiver};
-use crate::net::peer_connection::RequestMetadata;
+use async_std::{
+    io,
+    task,
+    path::Path,
+    prelude::*,
+    io::prelude::*,
+    fs::{File, OpenOptions},
+    sync::{Arc, Mutex, MutexGuard},
+};
+use futures::{
+    StreamExt,
+    sink::SinkExt,
+    channel::mpsc,
+    prelude::stream::FuturesUnordered,
+    channel::mpsc::{Sender, Receiver}
+};
+use crate::{
+    require_oneshot,
+    bencode::hash::Sha1,
+    net::peer_connection::RequestMetadata,
+    base::{
+        Result,
+        manager::ManagerEvent,
+        ipc::{Message, IPC},
+        meta_info::{TorrentMetaInfo, Info}
+    },
+};
 
-// type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub const BLOCK_SIZE: u32 = 16 * 1024;
 
@@ -148,10 +154,10 @@ impl Download {
         for i in 0..v.len() {
             let low = self.file_offsets[i + index] as usize / piece_len;
             let high = (self.file_offsets[i + index + 1] - 1) as usize / piece_len;
-
             // let mut file_is_complete = true;
             let contained_pieces = &self.pieces[low..=high];
-            println!("low{} high{} {} {}", low, high, self.pieces[low].is_complete, self.pieces[high].is_complete);
+            println!("low {} high {}", low, high);
+
             let file_is_complete = contained_pieces.iter().all(|p| {
                 p.is_complete
             });
@@ -160,25 +166,6 @@ impl Download {
                 println!("{}: file_is_complete", i + index);
                 self.manager_sender.send(ManagerEvent::FileFinish(i + index)).await?;
             }
-            // if name.ends_with(".temp") {
-            //     let low = self.file_offsets[i + index] as usize / piece_len;
-            //     let high = (self.file_offsets[i + index + 1] - 1) as usize / piece_len;
-            //
-            //     // let mut file_is_complete = true;
-            //     let contained_pieces = &self.pieces[low..=high];
-            //     let file_is_complete = contained_pieces.iter().all(|p| {
-            //         p.is_complete
-            //     });
-            //
-            //     if file_is_complete {
-            //         let new_name = &name[..name.len() - 5];
-            //         async_std::fs::rename(name, new_name).await?;
-            //
-            //         let new_file = OpenOptions::new().create(true).read(true).write(true).open(new_name).await?;
-            //         self.files[i + index] = Arc::new(Mutex::new(new_file));
-            //         self.file_paths[i + index] = String::from(new_name);
-            //     }
-            // }
         }
         Ok(())
     }
@@ -294,33 +281,21 @@ pub async fn store_block(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
     let (i, ptr_vec) =
         search_ptrs(file_offsets, block_offset, data.len());
     // println!("finish search_ptrs {} {}", block_offset, data.len());
-    if piece_offset == 216530944 {
-        println!("{:?}", ptr_vec);
-    }
 
     for (a, (block_ptr, file_ptr, len)) in ptr_vec.into_iter().enumerate() {
         // let mut file = files[i + a].clone();
         let mut file = files[i + a].lock().await;
         store(&mut file, file_ptr, block_ptr, len, data).await?;
     }
-
     Ok(())
 }
 
 async fn store(file: &mut File, file_ptr: u64,
                block_ptr: usize, len: usize,
                data: &[u8]) -> Result<()> {
-
-    // async_std::io::seek::SeekExt::seek(&mut file, io::SeekFrom::Start(file_ptr)).await;
-    // let s = async_std::io::SeekFrom::Start(file_ptr);
     file.seek(io::SeekFrom::Start(file_ptr)).await?;
     file.write_all(&data[block_ptr.. (block_ptr + len)]).await?;
-    file.write()
     // println!("store success! {} {}", file_ptr, len);
-    if file_ptr == 1595 {
-        println!("block_ptr {} block_ptr + len {}=======================", block_ptr, (block_ptr + len));
-        println!("{:?}", &data[14789..(14789 + 1595)]);
-    }
     Ok(())
 }
 

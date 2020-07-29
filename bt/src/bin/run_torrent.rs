@@ -1,9 +1,11 @@
 use std::fs::File;
 use std::io::Read;
-use bt::base::meta_info::TorrentMetaInfo;
-use async_std::task;
+use bt::{
+    base::meta_info::TorrentMetaInfo,
+    base::manager::manager_loop
+};
 use rand::Rng;
-use bt::base::manager::manager_loop;
+use async_std::task;
 
 pub const PEER_ID_PREFIX: &'static str = "-RC0001-";
 
