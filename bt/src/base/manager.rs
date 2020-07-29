@@ -22,7 +22,7 @@ pub struct Manager {
 }
 
 pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
-    let (mut sender, mut client_receiver) = mpsc::channel(10);
+    let (mut sender, mut client_receiver) = mpsc::channel(100);
     let (mut client_sender, mut events) = mpsc::channel(10);
     let mut peers: HashMap<Peer, Sender<IPC>> = HashMap::new();
 
@@ -34,6 +34,10 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     let len = file_offsets[file_offsets.len() - 1];
     let pieces = download_inline::create_pieces(len, &meta_info).await;
     println!("create_pieces finished");
+    println!("file_offsets: {:?}", file_offsets);
+    println!("len: {}", len);
+    let ps: Vec<u32> = pieces.iter().map(|p| p.length).collect();
+    println!("pieces len: {:?}", ps);
 
     let mut manager = Manager {
         our_peer_id: our_peer_id.clone(),
@@ -52,14 +56,18 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
 
     {
         let mut ps = Vec::new();
-        ps.push(Peer {
-            ip: "223.159.33.171".to_string(),
-            port: 23568
-        });
         // ps.push(Peer {
-        //     ip: "104.152.209.30".to_string(),
-        //     port: 50779
+        //     ip: "42.98.69.212".to_string(),
+        //     port: 10379
         // });
+        // ps.push(Peer {
+        //     ip: "51.158.148.85".to_string(),
+        //     port: 58579
+        // });
+        ps.push(Peer {
+            ip: "127.0.0.1".to_string(),
+            port: 57463
+        });
         // ps.push(Peer {
         //     ip: "205.185.122.158".to_string(),
         //     port: 54794

@@ -15,7 +15,7 @@ use crate::require_oneshot;
 use async_std::path::Path;
 use std::fs;
 use futures::prelude::stream::FuturesUnordered;
-use futures::StreamExt;
+use futures::{StreamExt, AsyncWriteExt};
 use crate::base::manager::ManagerEvent;
 use futures::channel::mpsc::{Sender, Receiver};
 use crate::net::peer_connection::RequestMetadata;
@@ -42,7 +42,7 @@ impl Block {
 }
 
 pub(crate) struct Piece {
-    length: u32,
+    pub(crate) length: u32,
     offset: u64,
     hash: Sha1,
     blocks: Vec<Block>,
@@ -103,14 +103,14 @@ impl Download {
             return Ok(());
         }
         // println!("file_offsets: {} {} {}", self.file_offsets[0], self.file_offsets[1] ,self.file_offsets[2]);
-        // println!("{} {}", piece.offset, block_index);
+        // println!("{}: {}", piece_index, block_index);
         store_block(&**self.files, &self.file_offsets, piece.offset, block_index, &data).await?;
 
         piece.blocks[block_index as usize].is_complete = true;
 
         if piece.has_all_blocks() {
             let valid = verify(piece, &**self.files, &self.file_offsets).await?;
-            println!("verify {}", valid);
+            println!("verify {} {} {}", piece_index, piece.length, valid);
             if !valid {
                 piece.reset_blocks();
             } else {
@@ -123,7 +123,7 @@ impl Download {
 
         // notify peers that this block is complete
         self.broadcast(IPC::BlockComplete(piece_index, block_index)).await?;
-        println!("block {} complete", block_index);
+        // println!("block {} complete", block_index);
         // notify peers if piece is complete
         if self.pieces[piece_index as usize].is_complete {
             println!("Piece {} complete", piece_index);
@@ -151,11 +151,13 @@ impl Download {
 
             // let mut file_is_complete = true;
             let contained_pieces = &self.pieces[low..=high];
+            println!("low{} high{} {} {}", low, high, self.pieces[low].is_complete, self.pieces[high].is_complete);
             let file_is_complete = contained_pieces.iter().all(|p| {
                 p.is_complete
             });
 
             if file_is_complete {
+                println!("{}: file_is_complete", i + index);
                 self.manager_sender.send(ManagerEvent::FileFinish(i + index)).await?;
             }
             // if name.ends_with(".temp") {
@@ -276,6 +278,11 @@ async fn verify(piece: &mut Piece, files: &[Arc<Mutex<File>>], file_offsets: &[u
 
     // calculate the hash, verify it, and update is_complete
     piece.is_complete = piece.hash == Sha1::calculate_sha1(&buffer);
+
+    if !piece.is_complete {
+        println!("{:?}", Sha1::calculate_sha1(&buffer));
+    }
+
     Ok(piece.is_complete)
 }
 
@@ -287,23 +294,33 @@ pub async fn store_block(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
     let (i, ptr_vec) =
         search_ptrs(file_offsets, block_offset, data.len());
     // println!("finish search_ptrs {} {}", block_offset, data.len());
+    if piece_offset == 216530944 {
+        println!("{:?}", ptr_vec);
+    }
 
     for (a, (block_ptr, file_ptr, len)) in ptr_vec.into_iter().enumerate() {
-        let mut file = files[i + a].clone();
-        let mut file = file.lock().await;
-        store(&mut file, file_ptr, block_ptr, len as u64, data).await?;
+        // let mut file = files[i + a].clone();
+        let mut file = files[i + a].lock().await;
+        store(&mut file, file_ptr, block_ptr, len, data).await?;
     }
 
     Ok(())
 }
 
 async fn store(file: &mut File, file_ptr: u64,
-               block_ptr: usize, len: u64,
+               block_ptr: usize, len: usize,
                data: &[u8]) -> Result<()> {
+
     // async_std::io::seek::SeekExt::seek(&mut file, io::SeekFrom::Start(file_ptr)).await;
+    // let s = async_std::io::SeekFrom::Start(file_ptr);
     file.seek(io::SeekFrom::Start(file_ptr)).await?;
-    file.write(&data[block_ptr..block_ptr + len as usize]).await?;
+    file.write_all(&data[block_ptr.. (block_ptr + len)]).await?;
+    file.write()
     // println!("store success! {} {}", file_ptr, len);
+    if file_ptr == 1595 {
+        println!("block_ptr {} block_ptr + len {}=======================", block_ptr, (block_ptr + len));
+        println!("{:?}", &data[14789..(14789 + 1595)]);
+    }
     Ok(())
 }
 
@@ -347,6 +364,11 @@ fn search_index(file_offsets: &[u64], offset: u64) -> usize {
 
 fn search_ptrs(file_offsets: &[u64], offset: u64, len: usize) -> (usize, Vec<(usize, u64, usize)>) {
     let index = search_index(file_offsets, offset);
+    // if len == 262144 {
+    //     println!("{:?}", file_offsets);
+    //     println!("search_index offset: {} len: {}", offset, len);
+    //     println!("search_index index: {}", index);
+    // }
 
     let mut vec = Vec::new();
     let mut i = index;
@@ -362,9 +384,9 @@ fn search_ptrs(file_offsets: &[u64], offset: u64, len: usize) -> (usize, Vec<(us
         left = left - l;
         file_ptr = 0;
         i = i + 1;
-        if i == file_offsets.len() - 1 {
-            return (index, vec);
-        };
+        // if i == file_offsets.len() - 1 {
+        //     return (index, vec);
+        // };
     };
 
     vec.push((data_ptr, file_ptr, left as usize));
@@ -447,9 +469,9 @@ pub mod download_inline {
         let num_pieces = meta_info.num_pieces();
 
         let mut pieces = Vec::with_capacity(num_pieces);
-        let offset = (num_pieces - 1) as u64 * piece_length as u64;
         let shas = meta_info.pieces();
         for i in 0..num_pieces {
+            let offset = i as u64 * piece_length as u64;
             let length = if i < (num_pieces - 1) {
                 piece_length
             } else {
@@ -463,6 +485,56 @@ pub mod download_inline {
             pieces.push(piece);
         }
         pieces
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::fs::{File, OpenOptions};
+    use std::io;
+    use std::io::{Seek, Read};
+    use crate::bencode::hash::Sha1;
+
+    #[test]
+    fn file_test() {
+        let my_path_1 = r#"D:\MyDocuments\rust\rustorrent\downloads\[Sakurato.sub] Yahari Ore no Seishun Love Come wa Machigatteiru Kan [03][HEVC-10Bit][1080P].mkv.temp"#;
+        let my_path_2 = r#"D:\MyDocuments\rust\rustorrent\downloads\桜都字幕组招募中！.png.temp"#;
+        let mut my_file_1 = OpenOptions::new().read(true).open(my_path_1).unwrap();
+        let mut my_file_2 = OpenOptions::new().read(true).open(my_path_2).unwrap();
+
+        let mut my_bytes = vec![0u8; 262_144];
+        my_file_1.seek(io::SeekFrom::Start(216_530_944));
+        my_file_1.read(&mut my_bytes[0..244_165]).unwrap();
+        my_file_2.seek(io::SeekFrom::Start(0));
+        my_file_2.read(&mut my_bytes[244_165..262_144]).unwrap();
+
+        let path_1 = r#"D:\MyVideo\电影\动漫\[Sakurato.sub] Yahari Ore no Seishun Love Come wa Machigatteiru Kan [03][HEVC-10Bit][1080P]\[Sakurato.sub] Yahari Ore no Seishun Love Come wa Machigatteiru Kan [03][HEVC-10Bit][1080P].mkv"#;
+        let path_2 = r#"D:\MyVideo\电影\动漫\[Sakurato.sub] Yahari Ore no Seishun Love Come wa Machigatteiru Kan [03][HEVC-10Bit][1080P]\桜都字幕组招募中！.png"#;
+        let mut file_1 = OpenOptions::new().read(true).open(path_1).unwrap();
+        let mut file_2 = OpenOptions::new().read(true).open(path_2).unwrap();
+        let mut bytes = vec![0u8; 262_144];
+        file_1.seek(io::SeekFrom::Start(216_530_944));
+        file_1.read(&mut bytes[0..244_165]).unwrap();
+        file_2.seek(io::SeekFrom::Start(0));
+        file_2.read(&mut bytes[244_165..262_144]).unwrap();
+
+
+        println!("{:?}", Sha1::calculate_sha1(&bytes));
+        println!("{:?}", Sha1::calculate_sha1(&my_bytes));
+        let mut indexs = vec![];
+        for (i, &byte) in bytes.iter().enumerate() {
+            // index = i;
+            let my_byte = my_bytes[i];
+            if byte != my_byte {
+                indexs.push(i);
+            }
+        }
+        println!("{:?}", indexs);
+        println!("{:?}", &my_bytes[260_549..]);
+        println!("{:?}", &bytes[260_549..]);
+        // assert_eq!(&bytes, &my_bytes);
+        // assert_eq!(Sha1::calculate_sha1(&bytes), Sha1::calculate_sha1(&my_bytes));
+
     }
 }
 

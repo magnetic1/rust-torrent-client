@@ -14,7 +14,7 @@ use crate::bencode::value::{FromValue, Value};
 use crate::base::spawn_and_log_error;
 use crate::bencode::decode::DecodeError;
 use std::option::Option::Some;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use rand::Rng;
 use crate::base::download::BLOCK_SIZE;
 use crate::base::manager::ManagerEvent;
@@ -60,7 +60,7 @@ pub struct PeerConnection {
     me: PeerMetadata,
     he: PeerMetadata,
 
-    to_request: HashMap<(u32, u32), (u32, u32, u32)>,
+    to_request: BTreeMap<(u32, u32), (u32, u32, u32)>,
     upload_in_progress: bool,
 
 
@@ -99,12 +99,12 @@ impl PeerConnection {
         Ok(())
     }
 
-    async fn receive_handshake(&self) -> Result<()> {
+    async fn receive_handshake(&mut self) -> Result<()> {
         let stream = &*self.stream;
 
-        // println!("{}: peer_conn_loop",task::current().id(),);
+        println!("{}: start receive",task::current().id(),);
         let pstrlen = read_n(stream, 1).await?;
-
+        println!("{}: receive pstrlen",task::current().id(),);
         read_n(stream, pstrlen[0] as u32).await?; // ignore pstr
         read_n(stream, 8).await?; // ignore reserved
         let info_hash = read_n(stream, 20).await?;
@@ -142,12 +142,19 @@ impl PeerConnection {
         let mut req_len = self.me.requests.len();
         while req_len < MAX_CONCURRENT_REQUESTS as usize {
             let len = self.to_request.len();
+            // println!("to_request {}", len);
             if len == 0 {
                 return Ok(());
             }
             // remove a block at random from to_request
             let (piece_index, block_index, block_length) = {
-                let index = rand::thread_rng().gen_range(0, len);
+                // todo: random index
+                // let index = rand::thread_rng().gen_range(0, len);
+                let index = if len - 1 >= 13200 {
+                    13200
+                } else {
+                    0
+                };
                 let target = self.to_request.keys().nth(index).unwrap().clone();
                 self.to_request.remove(&target).unwrap()
             };
@@ -402,6 +409,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
             peer_conn.request_more_blocks().await?;
         }
         Message::Bitfield(bytes) => {
+            println!("start bitfield");
             let l = peer_conn.he.has_pieces.len();
             for have_index in 0..l {
                 let bytes_index = have_index / 8;
@@ -417,6 +425,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
             }
             peer_conn.update_my_interested_status().await?;
             peer_conn.request_more_blocks().await?;
+            println!("end bitfield");
         }
         Message::Request(piece_index, offset, length) => {
             let block_index = offset / BLOCK_SIZE;
