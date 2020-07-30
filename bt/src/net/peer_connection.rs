@@ -28,8 +28,8 @@ use futures::{
     channel::mpsc::{self, Sender, Receiver},
 };
 use rand::Rng;
-use std::option::Option::Some;
 use std::collections::{HashMap, BTreeMap};
+use futures::io::Error;
 
 const PROTOCOL: &'static str = "BitTorrent protocol";
 const MAX_CONCURRENT_REQUESTS: u32 = 100;
@@ -74,19 +74,6 @@ pub struct PeerConnection {
 
     writer_sender: Sender<Message>,
     manager_sender: Sender<ManagerEvent>,
-    // stream_sender: Arc<TcpStream>,
-
-    // halt: bool,
-    // download: Arc<Download>,
-    //
-    // me: PeerMetadata,
-    // he: PeerMetadata,
-    // incoming_tx: Arc<Mutex<Sender<IPC>>>,
-    // outgoing_tx: Arc<Mutex<Sender<Message>>>,
-    // upload_in_progress: bool,
-    // to_request: Arc<Mutex<HashMap<(u32, u32), (u32, u32, u32)>>>,
-    //
-    // tx_down: Mutex<TX<Message>>
 }
 
 impl PeerConnection {
@@ -158,11 +145,7 @@ impl PeerConnection {
             let (piece_index, block_index, block_length) = {
                 // todo: random index
                 // let index = rand::thread_rng().gen_range(0, len);
-                let index = if len - 1 >= 13200 {
-                    13200
-                } else {
-                    0
-                };
+                let index = 0;
                 let target = self.to_request.keys().nth(index).unwrap().clone();
                 self.to_request.remove(&target).unwrap()
             };
@@ -287,9 +270,19 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
         peer_conn.send_handshake().await?;
     }
 
-
-    spawn_and_log_error(conn_read_loop(Arc::clone(&peer_conn.stream), ipc_sender.clone()));
-    spawn_and_log_error(conn_write_loop(writer_receiver, Arc::clone(&peer_conn.stream), ipc_sender));
+    let stream = Arc::clone(&peer_conn.stream);
+    let sen = ipc_sender.clone();
+    spawn_and_log_error(async move {
+        let e = conn_read_loop(stream, sen).await;
+        println!("conn_read_loop over!");
+        e
+    });
+    let stream = Arc::clone(&peer_conn.stream);
+    spawn_and_log_error(async move {
+        let e = conn_write_loop(writer_receiver, stream, ipc_sender).await;
+        println!("conn_write_loop over!");
+        e
+    });
     // send a bitfield message letting peer know what we have
     peer_conn.send_bitfield().await?;
 
@@ -328,24 +321,17 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
             }
         }
     };
-
-
-    // let stream = Arc::new(stream);
-    // let _handler = spawn_and_log_error(conn_write_loop())
-    // (s: futures::channel::mpsc::Sender<u32>, v: futures::channel::mpsc::Receiver<u32>) = futures::channel::mpsc::channel(0);
-    // s.
-
     Ok(())
 }
 
 async fn conn_read_loop(stream: Arc<TcpStream>, mut sender: Sender<IPC>) -> Result<()> {
     let mut stream = &*stream;
     // let message_size = ;
-
+    println!("task {}: conn_read_loop", task::current().id());
+    // let mut buf = vec![0; 4];
     while let message_size = bytes_to_u32(&read_n(stream, 4).await?) {
         let message = if message_size > 0 {
             // println!("{:?}: stream message len: {}", task::current().id(), message_size);
-
             let message = read_n(stream, message_size).await?;
             Message::new(&message[0], &message[1..])
         } else {
@@ -361,8 +347,9 @@ async fn conn_read_loop(stream: Arc<TcpStream>, mut sender: Sender<IPC>) -> Resu
 async fn conn_write_loop(mut messages: Receiver<Message>, stream: Arc<TcpStream>, mut sender: Sender<IPC>) -> Result<()> {
     let mut stream = &*stream;
     let mut messages = messages.fuse();
-
+    println!("task {}: conn_write_loop", task::current().id());
     loop {
+
         select! {
             message = messages.next().fuse() => match message {
                 Some(message) => {
@@ -370,7 +357,15 @@ async fn conn_write_loop(mut messages: Receiver<Message>, stream: Arc<TcpStream>
                         Message::Piece(_, _, _) => true,
                         _ => false
                     };
-                    stream.write_all(&message.clone().serialize()).await?;
+                    // stream.write_all(&message.clone().serialize()).await?;
+                    let res = stream.write_all(&message.clone().serialize()).await;
+                    match res {
+                        Ok(_) => {},
+                        Err(e) => {
+                            println!("message: {:?}", message);
+                            Err(e)?;
+                        },
+                    }
                     // println!("{:?}: outgoing reciever have recv message: {:?}", task::current().id(), message);
 
                     // notify the main PeerConnection thread that this block is finished

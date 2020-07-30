@@ -15,7 +15,7 @@ pub fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()>
 {
     task::spawn(async move {
         if let Err(e) = fut.await {
-            eprintln!("{} {}",task::current().id(), e)
+            eprintln!("task {} {}",task::current().id(), e)
         }
     })
 }

@@ -29,20 +29,22 @@ pub struct Manager {
 }
 
 pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
-    let (mut sender, mut client_receiver) = mpsc::channel(100);
+    let (mut sender, mut client_receiver) = mpsc::channel(10);
     let (mut client_sender, mut events) = mpsc::channel(10);
     let mut peers: HashMap<Peer, Sender<IPC>> = HashMap::new();
 
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
     println!("create_file_infos finished");
+
     let (file_offsets, file_paths, files)
         = download_inline::create_files(file_infos).await?;
     println!("create_files finished");
+
     let len = file_offsets[file_offsets.len() - 1];
     let pieces = download_inline::create_pieces(len, &meta_info).await;
     println!("create_pieces finished");
-    println!("file_offsets: {:?}", file_offsets);
-    println!("len: {}", len);
+    println!("file_offsets: {:?} len: {}", file_offsets, len);
+
     let ps: Vec<u32> = pieces.iter().map(|p| p.length).collect();
     println!("pieces len: {:?}", ps);
 
