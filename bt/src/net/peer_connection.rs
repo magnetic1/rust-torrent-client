@@ -32,7 +32,7 @@ use std::collections::{HashMap, BTreeMap};
 use futures::io::Error;
 
 const PROTOCOL: &'static str = "BitTorrent protocol";
-const MAX_CONCURRENT_REQUESTS: u32 = 100;
+const MAX_CONCURRENT_REQUESTS: u32 = 10;
 
 #[derive(PartialEq, Debug, Eq, Hash, Clone)]
 pub struct Peer {
@@ -68,7 +68,7 @@ pub struct PeerConnection {
     me: PeerMetadata,
     he: PeerMetadata,
 
-    to_request: BTreeMap<(u32, u32), (u32, u32, u32)>,
+    to_request: HashMap<(u32, u32), (u32, u32, u32)>,
     upload_in_progress: bool,
 
 
@@ -144,8 +144,8 @@ impl PeerConnection {
             // remove a block at random from to_request
             let (piece_index, block_index, block_length) = {
                 // todo: random index
-                // let index = rand::thread_rng().gen_range(0, len);
-                let index = 0;
+                let index = rand::thread_rng().gen_range(0, len);
+                // let index = 0;
                 let target = self.to_request.keys().nth(index).unwrap().clone();
                 self.to_request.remove(&target).unwrap()
             };
@@ -303,6 +303,7 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
                 }
             },
         };
+        // println!("ipc loop: {:?}", ipc);
 
         match ipc {
             IPC::Message(message) => process_message(&mut peer_conn, message).await?,
@@ -444,7 +445,9 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
         Message::Piece(piece_index, offset, data) => {
             let block_index = offset / BLOCK_SIZE;
             peer_conn.me.requests.remove(piece_index, block_index);
+            // println!("Message::Piece start send");
             peer_conn.manager_sender.send(ManagerEvent::Download(Message::Piece(piece_index, offset, data))).await?;
+            // println!("Message::Piece finish send");
             peer_conn.update_my_interested_status().await?;
             peer_conn.request_more_blocks().await?;
         }

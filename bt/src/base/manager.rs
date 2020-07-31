@@ -32,8 +32,9 @@ pub struct Manager {
 }
 
 pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
-    let (mut sender, mut client_receiver) = mpsc::channel(10);
-    let (mut client_sender, mut events) = mpsc::channel(10);
+    let (mut sender_to_download, mut download_receiver) = mpsc::channel(10);
+    let (mut sender_from_conn, mut events_from_conn) = mpsc::channel(10);
+    let (mut sender_from_download, mut events_from_download) = mpsc::unbounded();
     let mut peers: HashMap<Peer, Sender<IPC>> = HashMap::new();
 
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
@@ -61,7 +62,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     };
 
     let _down_handle = spawn_and_log_error(
-        download_loop(client_receiver, client_sender.clone(),
+        download_loop(download_receiver, sender_from_download,
                       Arc::clone(&manager.files), manager.file_offsets.clone(),
                       manager.our_peer_id.clone(), manager.meta_info.clone())
     );
@@ -85,27 +86,33 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         //     port: 54794
         // });
         for p in ps {
-            client_sender.send(ManagerEvent::Connection(true, p)).await?;
+            sender_from_conn.send(ManagerEvent::Connection(true, p)).await?;
         }
     }
 
     let (disconnect_sender, mut disconnect_receiver) =
         mpsc::channel(10);
-    let mut events = events.fuse();
+    let mut events_from_conn = events_from_conn.fuse();
+    let mut events_from_download = events_from_download.fuse();
     loop {
         let event = select! {
-            event = events.next().fuse() => match event {
+            event = events_from_download.next().fuse() => match event {
+                Some(event) => event,
+                None => break,
+            },
+            event = events_from_conn.next().fuse() => match event {
                 Some(event) => event,
                 None => break,
             },
             disconnect = disconnect_receiver.next().fuse() => {
                 let peer = disconnect.unwrap();
+                println!("remove {:?}", peer);
                 assert!(peers.remove(&peer).is_some());
                 println!("{:?}: disconnected", peer);
                 continue;
             },
         };
-        println!("manger loop: {:?}", event);
+        // println!("manger loop: {:?}", event);
 
         match event {
             ManagerEvent::Broadcast(ipc) => {
@@ -123,7 +130,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                     let (peer_sender, peer_receiver) = mpsc::channel(10);
                     let params = (send_handshake_first, our_peer_id.clone(),
                                   manager.meta_info.info_hash(), peer.clone(),
-                                  peer_sender.clone(), peer_receiver, client_sender.clone());
+                                  peer_sender.clone(), peer_receiver, sender_from_conn.clone());
                     let mut disconnect_sender = disconnect_sender.clone();
                     spawn_and_log_error( async move {
                         let peer = params.3.clone();
@@ -154,7 +161,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                 }
             }
 
-            e => sender.send(e).await?,
+            e => sender_to_download.send(e).await?,
 
             // ManagerEvent::RequireData(_, _) => {}
             // ManagerEvent::RequireIncompleteBlocks(_, _) => {}

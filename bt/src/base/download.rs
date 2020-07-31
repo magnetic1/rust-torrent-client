@@ -26,6 +26,7 @@ use crate::{
         meta_info::{TorrentMetaInfo, Info}
     },
 };
+use futures::channel::mpsc::UnboundedSender;
 
 
 pub const BLOCK_SIZE: u32 = 16 * 1024;
@@ -97,7 +98,7 @@ pub struct Download {
     files: Arc<Vec<Arc<Mutex<File>>>>,
     file_offsets: Vec<u64>,
     // file_paths: Vec<String>,
-    manager_sender: Sender<ManagerEvent>,
+    manager_sender: UnboundedSender<ManagerEvent>,
 }
 
 impl Download {
@@ -111,6 +112,7 @@ impl Download {
         // println!("file_offsets: {} {} {}", self.file_offsets[0], self.file_offsets[1] ,self.file_offsets[2]);
         // println!("{}: {}", piece_index, block_index);
         store_block(&**self.files, &self.file_offsets, piece.offset, block_index, &data).await?;
+        // println!("store_block： {} {}", piece_index, block_index);
 
         piece.blocks[block_index as usize].is_complete = true;
 
@@ -127,6 +129,7 @@ impl Download {
             }
         }
 
+        // println!("BlockComplete： {} {}", piece_index, block_index);
         // notify peers that this block is complete
         self.broadcast(IPC::BlockComplete(piece_index, block_index)).await?;
         // println!("block {} complete", block_index);
@@ -149,14 +152,15 @@ impl Download {
 
         let (index, v) = search_ptrs(&self.file_offsets, piece.offset, piece.length as usize);
 
-        let piece_len = require_oneshot!(self.manager_sender, ManagerEvent::RequirePieceLength);
+        // let piece_len = require_oneshot!(self.manager_sender, ManagerEvent::RequirePieceLength);
+        let piece_len = self.meta_info.piece_length();
 
         for i in 0..v.len() {
             let low = self.file_offsets[i + index] as usize / piece_len;
             let high = (self.file_offsets[i + index + 1] - 1) as usize / piece_len;
             // let mut file_is_complete = true;
             let contained_pieces = &self.pieces[low..=high];
-            println!("low {} high {}", low, high);
+            // println!("low {} high {}", low, high);
 
             let file_is_complete = contained_pieces.iter().all(|p| {
                 p.is_complete
@@ -214,7 +218,7 @@ impl Download {
     }
 }
 
-pub async fn download_loop(mut rx: Receiver<ManagerEvent>, mut manager_sender: Sender<ManagerEvent>,
+pub async fn download_loop(mut rx: Receiver<ManagerEvent>, mut manager_sender: UnboundedSender<ManagerEvent>,
                            files: Arc<Vec<Arc<Mutex<File>>>>, file_offsets: Vec<u64>,
                            our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
     // let file_infos = download_inline::create_file_infos(&meta_info.info).await;
@@ -235,11 +239,12 @@ pub async fn download_loop(mut rx: Receiver<ManagerEvent>, mut manager_sender: S
     };
 
     while let Some(event) = rx.next().await {
+        // println!("download loop: {:?}", event);
         match event {
             ManagerEvent::Download(Message::Piece(piece_index, offset, data)) => {
                 let block_index = offset / BLOCK_SIZE;
                 download.store(piece_index, block_index, data).await?;
-                // println!("{:?} {:?}: store block {}", task::current().id(), piece_index, block_index);
+                // println!("finish store block: (Piece({}, {}, size=16384))", piece_index, offset);
             }
             ManagerEvent::RequireData(request_data, sender) => {
                 let buf = download.retrieve_data(request_data).await?;
@@ -262,6 +267,7 @@ pub async fn download_loop(mut rx: Receiver<ManagerEvent>, mut manager_sender: S
 
 async fn verify(piece: &mut Piece, files: &[Arc<Mutex<File>>], file_offsets: &[u64]) -> Result<bool> {
     let buffer = read(files, file_offsets, piece.offset, piece.length).await?;
+    // println!("read piece: {} {}", piece.offset, piece.length);
 
     // calculate the hash, verify it, and update is_complete
     piece.is_complete = piece.hash == Sha1::calculate_sha1(&buffer);
@@ -307,12 +313,12 @@ async fn read(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
     let mut buffer: Vec<u8> = vec![0; len as usize];
 
     for (a, (piece_ptr, file_ptr, len)) in ptr_vec.into_iter().enumerate() {
-        let file = files[i + a].clone();
-        let mut file = file.lock().await;
+        // let file = files[i + a].clone();
+        let mut file = files[i + a].lock().await;
         // read in the part of the file corresponding to the piece
         file.seek(io::SeekFrom::Start(file_ptr as u64)).await?;
         // let mut handle = file.take(len);
-        println!("read file_ptr:{} piece_ptr:{} len:{}", file_ptr, piece_ptr, len);
+        // println!("read file_ptr:{} piece_ptr:{} len:{}", file_ptr, piece_ptr, len);
         file.read(&mut buffer[piece_ptr..piece_ptr + len]).await?;
     }
     Ok(buffer)
