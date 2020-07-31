@@ -272,13 +272,14 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
 
     let stream = Arc::clone(&peer_conn.stream);
     let sen = ipc_sender.clone();
+    let (shutdown_sender, shutdown) = mpsc::channel(1);
     spawn_and_log_error(async move {
-        let e = conn_read_loop(stream, sen).await;
+        let e = conn_read_loop(stream, sen, shutdown_sender).await;
         println!("conn_read_loop over!");
         e
     });
     let stream = Arc::clone(&peer_conn.stream);
-    spawn_and_log_error(async move {
+    let write_handle = spawn_and_log_error(async move {
         let e = conn_write_loop(writer_receiver, stream, ipc_sender).await;
         println!("conn_write_loop over!");
         e
@@ -286,12 +287,20 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
     // send a bitfield message letting peer know what we have
     peer_conn.send_bitfield().await?;
 
+    let mut ipcs = ipcs.fuse();
+    let mut shutdown = shutdown.fuse();
     while !peer_conn.halt {
-        let ipc = match ipcs.next().await {
-            Some(ipc) => ipc,
-            None => {
-                peer_conn.halt = true;
-                break;
+        let ipc = select! {
+            void = shutdown.next().fuse() => match void {
+                Some(void) => panic!("never reached!"),
+                None => break,
+            },
+            ipc = ipcs.next().fuse() => match ipc {
+                Some(ipc) => ipc,
+                None => {
+                    peer_conn.halt = true;
+                    break;
+                }
             },
         };
 
@@ -321,10 +330,15 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
             }
         }
     };
+    drop(peer_conn);
+    write_handle.await;
     Ok(())
 }
 
-async fn conn_read_loop(stream: Arc<TcpStream>, mut sender: Sender<IPC>) -> Result<()> {
+#[derive(Debug)]
+enum Void {}
+
+async fn conn_read_loop(stream: Arc<TcpStream>, mut sender: Sender<IPC>, _shutdown: Sender<Void>) -> Result<()> {
     let mut stream = &*stream;
     // let message_size = ;
     println!("task {}: conn_read_loop", task::current().id());
@@ -357,17 +371,7 @@ async fn conn_write_loop(mut messages: Receiver<Message>, stream: Arc<TcpStream>
                         Message::Piece(_, _, _) => true,
                         _ => false
                     };
-                    // stream.write_all(&message.clone().serialize()).await?;
-                    let res = stream.write_all(&message.clone().serialize()).await;
-                    match res {
-                        Ok(_) => {},
-                        Err(e) => {
-                            println!("message: {:?}", message);
-                            Err(e)?;
-                        },
-                    }
-                    // println!("{:?}: outgoing reciever have recv message: {:?}", task::current().id(), message);
-
+                    stream.write_all(&message.clone().serialize()).await?;
                     // notify the main PeerConnection thread that this block is finished
                     if is_block_upload {
                         sender.send(IPC::BlockUploaded).await?;
@@ -375,6 +379,8 @@ async fn conn_write_loop(mut messages: Receiver<Message>, stream: Arc<TcpStream>
                 },
                 None => break,
             }
+
+
         }
     }
     Ok(())

@@ -1,8 +1,11 @@
 use async_std::{
     sync::{Arc, Mutex},
-    fs::{File, OpenOptions}
+    fs::{File, OpenOptions},
+    stream,
 };
 use futures::{
+    select,
+    FutureExt,
     StreamExt,
     SinkExt,
     channel::mpsc,
@@ -75,7 +78,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         // });
         ps.push(Peer {
             ip: "127.0.0.1".to_string(),
-            port: 57298
+            port: 54682
         });
         // ps.push(Peer {
         //     ip: "205.185.122.158".to_string(),
@@ -86,27 +89,51 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         }
     }
 
+    let (disconnect_sender, mut disconnect_receiver) =
+        mpsc::channel(10);
+    let mut events = events.fuse();
+    loop {
+        let event = select! {
+            event = events.next().fuse() => match event {
+                Some(event) => event,
+                None => break,
+            },
+            disconnect = disconnect_receiver.next().fuse() => {
+                let peer = disconnect.unwrap();
+                assert!(peers.remove(&peer).is_some());
+                println!("{:?}: disconnected", peer);
+                continue;
+            },
+        };
+        println!("manger loop: {:?}", event);
 
-    while let Some(event) = events.next().await {
         match event {
             ManagerEvent::Broadcast(ipc) => {
-                peers.retain(|peer, sender| {
-                    async_std::task::block_on(async {
-                        match sender.send(ipc.clone()).await {
-                            Ok(_) => true,
-                            Err(_) => false,
-                        }
-                    })
-                });
+                let mut delete_keys = Vec::with_capacity(peers.len());
+                for ( p, s) in peers.iter_mut() {
+                    match s.send(ipc.clone()).await {
+                        Ok(()) => (),
+                        Err(_) => { delete_keys.push(p.clone());}
+                    }
+                }
+                delete_keys.iter().map(|p| peers.remove(p));
             }
             ManagerEvent::Connection(send_handshake_first, peer) => {
                 if peers.get(&peer).is_none() {
                     let (peer_sender, peer_receiver) = mpsc::channel(10);
-                    spawn_and_log_error(
-                        peer_conn_loop(send_handshake_first, our_peer_id.clone(),
-                                       manager.meta_info.info_hash(), peer.clone(), peer_sender.clone(),
-                                       peer_receiver, client_sender.clone())
-                    );
+                    let params = (send_handshake_first, our_peer_id.clone(),
+                                  manager.meta_info.info_hash(), peer.clone(),
+                                  peer_sender.clone(), peer_receiver, client_sender.clone());
+                    let mut disconnect_sender = disconnect_sender.clone();
+                    spawn_and_log_error( async move {
+                        let peer = params.3.clone();
+                        let res = peer_conn_loop(params.0, params.1,
+                                       params.2, params.3, params.4,
+                                       params.5, params.6).await;
+                        disconnect_sender.send(peer).await.unwrap();
+                        println!("peer connection finished");
+                        res
+                    });
                     assert!(peers.insert(peer, peer_sender.clone()).is_none());
                 }
             }
@@ -140,6 +167,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     Ok(())
 }
 
+#[derive(Debug)]
 pub enum ManagerEvent {
     Broadcast(IPC),
     Connection(bool, Peer),
