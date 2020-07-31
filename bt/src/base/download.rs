@@ -392,6 +392,8 @@ pub mod download_inline {
             Info::Multi(m) => {
                 for f in &m.files {
                     let mut file_path = file_path.clone();
+                    file_path.push_str(&m.name);
+                    file_path.push_str("/");
                     file_path.push_str(&f.path.join("/"));
                     file_path.push_str(".temp");
 

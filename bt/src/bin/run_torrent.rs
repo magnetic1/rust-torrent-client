@@ -10,7 +10,7 @@ use async_std::task;
 pub const PEER_ID_PREFIX: &'static str = "-RC0001-";
 
 fn main() {
-    let filename = r#"C:\Users\12287\Downloads\fb937c7a06bf333b50b446612b785e96047af5e6.torrent"#;
+    let filename = r#"C:\Users\12287\Downloads\03ffe2d471d52a832ea02f2de06c82a14a7cfbcb.torrent"#;
     let mut bytes = Vec::new();
     File::open(filename).unwrap().read_to_end(&mut bytes).unwrap();
     let metainfo = TorrentMetaInfo::parse(&bytes);
