@@ -1,15 +1,19 @@
-use crate::net::peer_connection::Peer;
-use crate::bencode::decode::{Decoder, DecodeTo, DecodeError};
-use crate::bencode::value::{FromValue, Value};
-use crate::base::Result;
-use hyper::{body::HttpBody as _, Client, Uri};
+use crate::{
+    base::Result,
+    bencode::value::{FromValue, Value},
+    bencode::decode::{Decoder, DecodeTo, DecodeError},
+    net::peer_connection::Peer,
+    base::meta_info::TorrentMetaInfo
+};
+use hyper::{
+    Client,
+    Uri,
+    body::Buf,
+    Request,
+    Response,
+    Body
+};
 use url::percent_encoding::{percent_encode, FORM_URLENCODED_ENCODE_SET};
-use futures::AsyncReadExt;
-use hyper::body::Buf;
-use std::str::FromStr;
-use std::time::Duration;
-use hyper::{Request, Response, Body};
-use crate::base::meta_info::TorrentMetaInfo;
 
 async fn get_tracker_response(peer_id: &str, announce: &str, length: u64,
                               info_hash: &[u8], listener_port: u16) -> Result<TrackerResponse> {
