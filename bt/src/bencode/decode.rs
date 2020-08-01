@@ -49,6 +49,8 @@ pub enum DecodeError {
     },
 }
 
+impl std::error::Error for DecodeError {}
+
 impl fmt::Display for DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

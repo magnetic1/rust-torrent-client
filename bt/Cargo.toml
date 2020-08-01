@@ -11,14 +11,20 @@ encoding = "0.2"
 hex = {version = "0.3", default-features = false, optional = true}
 bencode = "0.1"
 getopts = "0.2"
-hyper = "0.10"
 rand = "0.3"
 rust-crypto = "0.2"
 url = "0.2"
-snafu = "0.6.6"
+#snafu = "0.6.6"
+
+
+hyper = "0.13"
+#tokio = { version = "0.2", features = ["full"] }
 
 futures = "0.3.0"
 
 [dependencies.async-std]
 version = "1.5.0"
 features = ["unstable"]
+
+[dev-dependencies]
+tokio-test = "*"
