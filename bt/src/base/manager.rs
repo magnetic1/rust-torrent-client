@@ -16,7 +16,7 @@ use crate::{
     base::ipc::{Message, IPC},
     base::download::{Piece, download_loop, download_inline},
     base::meta_info::TorrentMetaInfo,
-    base::spawn_and_log_error
+    base::spawn_and_log_error,
 };
 use std::collections::HashMap;
 
@@ -79,7 +79,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         // });
         ps.push(Peer {
             ip: "127.0.0.1".to_string(),
-            port: 54682
+            port: 54682,
         });
         // ps.push(Peer {
         //     ip: "205.185.122.158".to_string(),
@@ -117,10 +117,10 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         match event {
             ManagerEvent::Broadcast(ipc) => {
                 let mut delete_keys = Vec::with_capacity(peers.len());
-                for ( p, s) in peers.iter_mut() {
+                for (p, s) in peers.iter_mut() {
                     match s.send(ipc.clone()).await {
                         Ok(()) => (),
-                        Err(_) => { delete_keys.push(p.clone());}
+                        Err(_) => { delete_keys.push(p.clone()); }
                     }
                 }
                 delete_keys.iter().map(|p| peers.remove(p));
@@ -132,11 +132,11 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                                   manager.meta_info.info_hash(), peer.clone(),
                                   peer_sender.clone(), peer_receiver, sender_from_conn.clone());
                     let mut disconnect_sender = disconnect_sender.clone();
-                    spawn_and_log_error( async move {
+                    spawn_and_log_error(async move {
                         let peer = params.3.clone();
                         let res = peer_conn_loop(params.0, params.1,
-                                       params.2, params.3, params.4,
-                                       params.5, params.6).await;
+                                                 params.2, params.3, params.4,
+                                                 params.5, params.6).await;
                         disconnect_sender.send(peer).await.unwrap();
                         println!("peer connection finished");
                         res
@@ -156,7 +156,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                     let new_file = OpenOptions::new().create(true).read(true).write(true).open(new_name).await?;
                     let mut file = manager.files[file_index].lock().await;
                     *file = new_file;
-                     // = Arc::new(Mutex::new(new_file));
+                    // = Arc::new(Mutex::new(new_file));
                     manager.file_paths[file_index] = String::from(new_name);
                 }
             }

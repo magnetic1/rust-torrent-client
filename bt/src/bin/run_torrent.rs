@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::Read;
 use bt::{
     base::meta_info::TorrentMetaInfo,
-    base::manager::manager_loop
+    base::manager::manager_loop,
 };
 use rand::Rng;
 use async_std::task;

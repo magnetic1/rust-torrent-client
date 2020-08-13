@@ -3,7 +3,7 @@ use crate::{
     bencode::value::{FromValue, Value},
     bencode::decode::{Decoder, DecodeTo, DecodeError},
     net::peer_connection::Peer,
-    base::meta_info::TorrentMetaInfo
+    base::meta_info::TorrentMetaInfo,
 };
 use hyper::{
     Client,
@@ -11,7 +11,7 @@ use hyper::{
     body::Buf,
     Request,
     Response,
-    Body
+    Body,
 };
 use url::percent_encoding::{percent_encode, FORM_URLENCODED_ENCODE_SET};
 
