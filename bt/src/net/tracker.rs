@@ -14,6 +14,32 @@ use hyper::{
     Body,
 };
 use url::percent_encoding::{percent_encode, FORM_URLENCODED_ENCODE_SET};
+use parallel_stream::prelude::*;
+
+pub async fn get_peer(t: &TorrentMetaInfo) {
+    let announces = match t.announce_list {
+        Some(ref v) => {
+            v[0].iter().map(|s| s.clone()).collect::<Vec<String>>()
+        }
+        None => {
+            let s = t.announce.as_ref().unwrap().clone();
+            vec![s]
+        }
+    };
+    let v = vec![1, 2, 3, 4];
+    let mut out: Vec<usize> = v
+        .into_par_stream()
+        .map(|n| async move { n * n })
+        .collect()
+        .await;
+
+    let mut out: Vec<String> = announces
+        .into_par_stream()
+        .map(|n: String| async move {
+            get_peers()
+        }).collect()
+        .await;
+}
 
 async fn get_tracker_response(peer_id: &str, announce: &str, length: u64,
                               info_hash: &[u8], listener_port: u16) -> Result<TrackerResponse> {

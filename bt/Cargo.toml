@@ -21,9 +21,10 @@ hyper = "0.13"
 #tokio = { version = "0.2", features = ["full"] }
 
 futures = "0.3.0"
+parallel-stream = "2.1.1"
 
 [dependencies.async-std]
-version = "1.5.0"
+version = "1.6.2"
 features = ["unstable"]
 
 [dev-dependencies]

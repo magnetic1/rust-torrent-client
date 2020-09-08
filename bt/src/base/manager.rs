@@ -69,22 +69,10 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
 
     {
         let mut ps = Vec::new();
-        // ps.push(Peer {
-        //     ip: "42.98.69.212".to_string(),
-        //     port: 10379
-        // });
-        // ps.push(Peer {
-        //     ip: "51.158.148.85".to_string(),
-        //     port: 58579
-        // });
         ps.push(Peer {
             ip: "127.0.0.1".to_string(),
             port: 54682,
         });
-        // ps.push(Peer {
-        //     ip: "205.185.122.158".to_string(),
-        //     port: 54794
-        // });
         for p in ps {
             sender_from_conn.send(ManagerEvent::Connection(true, p)).await?;
         }
