@@ -33,12 +33,12 @@ pub async fn get_peer(t: &TorrentMetaInfo) {
         .collect()
         .await;
 
-    let mut out: Vec<String> = announces
-        .into_par_stream()
-        .map(|n: String| async move {
-            get_peers()
-        }).collect()
-        .await;
+    // let mut out: Vec<String> = announces
+    //     .into_par_stream()
+    //     .map(|n: String| async move {
+    //         get_peers()
+    //     }).collect()
+    //     .await;
 }
 
 async fn get_tracker_response(peer_id: &str, announce: &str, length: u64,

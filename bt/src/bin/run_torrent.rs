@@ -15,7 +15,7 @@ fn main() {
     let mut bytes = Vec::new();
     File::open(filename).unwrap().read_to_end(&mut bytes).unwrap();
     let metainfo = TorrentMetaInfo::parse(&bytes);
-    get_peer(&metainfo);
+    // get_peer(&metainfo);
 
     let mut rng = rand::thread_rng();
     let rand_chars: String = rng.gen_ascii_chars().take(20 - PEER_ID_PREFIX.len()).collect();
