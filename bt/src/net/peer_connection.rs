@@ -3,7 +3,7 @@ use async_std::{
     sync::Arc,
     prelude::*,
     net::TcpStream,
-    net::Ipv4Addr
+    net::Ipv4Addr,
 };
 use crate::{
     base::{
@@ -12,12 +12,12 @@ use crate::{
         spawn_and_log_error,
         download::BLOCK_SIZE,
         manager::ManagerEvent,
-        Result
+        Result,
     },
     bencode::{
         hash::Sha1,
         value::{FromValue, Value},
-        decode::DecodeError
+        decode::DecodeError,
     },
 };
 use futures::{
@@ -30,6 +30,7 @@ use futures::{
 use rand::Rng;
 use std::collections::{HashMap, BTreeMap};
 use futures::io::Error;
+use futures::channel::mpsc::UnboundedSender;
 
 const PROTOCOL: &'static str = "BitTorrent protocol";
 const MAX_CONCURRENT_REQUESTS: u32 = 10;
@@ -71,9 +72,8 @@ pub struct PeerConnection {
     to_request: HashMap<(u32, u32), (u32, u32, u32)>,
     upload_in_progress: bool,
 
-
     writer_sender: Sender<Message>,
-    manager_sender: Sender<ManagerEvent>,
+    manager_sender: UnboundedSender<ManagerEvent>,
 }
 
 impl PeerConnection {
@@ -97,9 +97,9 @@ impl PeerConnection {
     async fn receive_handshake(&mut self) -> Result<()> {
         let stream = &*self.stream;
 
-        println!("{}: start receive",task::current().id(),);
+        println!("task {}: start receive", task::current().id(), );
         let pstrlen = read_n(stream, 1).await?;
-        println!("{}: receive pstrlen",task::current().id(),);
+        println!("{}: receive pstrlen", task::current().id(), );
         read_n(stream, pstrlen[0] as u32).await?; // ignore pstr
         read_n(stream, 8).await?; // ignore reserved
         let info_hash = read_n(stream, 20).await?;
@@ -233,9 +233,8 @@ impl PeerConnection {
 pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
                             info_hash: Sha1, peer: Peer,
                             mut ipc_sender: Sender<IPC>, mut ipcs: Receiver<IPC>,
-                            mut manager_sender: Sender<ManagerEvent>
+                            mut manager_sender: UnboundedSender<ManagerEvent>,
 ) -> Result<()> {
-
     let have_pieces = {
         let (sender, receiver) = futures::channel::oneshot::channel();
         manager_sender.send(ManagerEvent::RequireHavePieces(sender)).await?;
@@ -247,7 +246,7 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
         Arc::new(TcpStream::connect((ip, peer.port)).await?)
     };
     // let (mut ipc_sender, mut ipcs) = mpsc::channel(10);
-    let (mut writer_sender ,mut writer_receiver) = mpsc::channel(10);
+    let (mut writer_sender, mut writer_receiver) = mpsc::channel(10);
 
     let mut peer_conn = PeerConnection {
         halt: false,
@@ -259,7 +258,7 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
         to_request: Default::default(),
         upload_in_progress: false,
         writer_sender,
-        manager_sender
+        manager_sender,
     };
 
     if send_handshake_first {
@@ -319,7 +318,6 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
                 peer_conn.me.has_pieces[piece_index as usize] = true;
                 peer_conn.update_my_interested_status().await?;
                 peer_conn.writer_sender.send(Message::Have(piece_index)).await?;
-
             }
             IPC::DownloadComplete => {
                 // peer_conn.halt = true;
@@ -364,7 +362,6 @@ async fn conn_write_loop(mut messages: Receiver<Message>, stream: Arc<TcpStream>
     let mut messages = messages.fuse();
     println!("task {}: conn_write_loop", task::current().id());
     loop {
-
         select! {
             message = messages.next().fuse() => match message {
                 Some(message) => {

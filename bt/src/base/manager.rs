@@ -33,7 +33,7 @@ pub struct Manager {
 
 pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
     let (mut sender_to_download, mut download_receiver) = mpsc::channel(10);
-    let (mut sender_from_conn, mut events_from_conn) = mpsc::channel(10);
+    let (mut sender_from_conn, mut events_from_conn) = mpsc::unbounded();
     let (mut sender_from_download, mut events_from_download) = mpsc::unbounded();
     let mut peers: HashMap<Peer, Sender<IPC>> = HashMap::new();
 
