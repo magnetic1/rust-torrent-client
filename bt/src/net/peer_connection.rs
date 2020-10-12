@@ -270,10 +270,10 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
     }
 
     let stream = Arc::clone(&peer_conn.stream);
-    let sen = ipc_sender.clone();
+    let ipc_sender1 = ipc_sender.clone();
     let (shutdown_sender, shutdown) = mpsc::channel(1);
     spawn_and_log_error(async move {
-        let e = conn_read_loop(stream, sen, shutdown_sender).await;
+        let e = conn_read_loop(stream, ipc_sender1, shutdown_sender).await;
         println!("conn_read_loop over!");
         e
     });
