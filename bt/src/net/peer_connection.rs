@@ -31,6 +31,7 @@ use rand::Rng;
 use std::collections::{HashMap, BTreeMap};
 use futures::io::Error;
 use futures::channel::mpsc::UnboundedSender;
+use async_std::task::JoinHandle;
 
 const PROTOCOL: &'static str = "BitTorrent protocol";
 const MAX_CONCURRENT_REQUESTS: u32 = 10;
@@ -65,7 +66,7 @@ pub struct PeerConnection {
     info_hash: Sha1,
     // send_handshake_first: bool,
 
-    stream: Arc<TcpStream>,
+    stream: TcpStream,
     me: PeerMetadata,
     he: PeerMetadata,
 
@@ -77,6 +78,18 @@ pub struct PeerConnection {
 }
 
 impl PeerConnection {
+    async fn handshake(&mut self, send_handshake_first: bool) -> Result<()> {
+        if send_handshake_first {
+            self.send_handshake().await?;
+            self.receive_handshake().await?;
+        } else {
+            self.receive_handshake().await?;
+            self.send_handshake().await?;
+        }
+
+        Ok(())
+    }
+
     async fn send_handshake(&mut self) -> Result<()> {
         let message = {
             let mut message = vec![];
@@ -87,7 +100,7 @@ impl PeerConnection {
             message.extend(self.our_peer_id.bytes());
             message
         };
-        let mut stream = &*self.stream;
+        let mut stream = &mut self.stream;
         // stream.write_all(&[1,2]).await?;
         // let stream = &*self.stream;
         stream.write_all(message.as_slice()).await?;
@@ -95,7 +108,7 @@ impl PeerConnection {
     }
 
     async fn receive_handshake(&mut self) -> Result<()> {
-        let stream = &*self.stream;
+        let stream = &mut self.stream;
 
         println!("task {}: start receive", task::current().id(), );
         let pstrlen = read_n(stream, 1).await?;
@@ -230,9 +243,29 @@ impl PeerConnection {
     }
 }
 
-pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
-                            info_hash: Sha1, peer: Peer,
-                            mut ipc_sender: Sender<IPC>, mut ipcs: Receiver<IPC>,
+fn start_read_loop(mut stream: TcpStream, mut ipc_sender: Sender<IPC>) -> Receiver<Void> {
+    let (shutdown_sender, shutdown) = mpsc::channel(1);
+    spawn_and_log_error(async move {
+        let res = conn_read_loop(stream, ipc_sender, shutdown_sender).await;
+        println!("conn_read_loop over!");
+        res
+    });
+
+    shutdown
+}
+
+fn start_write_loop(mut stream: TcpStream, mut ipc_sender: Sender<IPC>, mut writer_receiver: Receiver<Message>) -> JoinHandle<()> {
+    let write_handle = spawn_and_log_error(async move {
+        let e = conn_write_loop(writer_receiver, stream, ipc_sender).await;
+        println!("conn_write_loop over!");
+        e
+    });
+
+    write_handle
+}
+
+pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String, info_hash: Sha1,
+                            peer: Peer, mut ipc_sender: Sender<IPC>, mut ipcs: Receiver<IPC>,
                             mut manager_sender: UnboundedSender<ManagerEvent>,
 ) -> Result<()> {
     let have_pieces = {
@@ -241,11 +274,12 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
         receiver.await?
     };
     let num_pieces = have_pieces.len();
+
     let stream = {
         let ip: Ipv4Addr = peer.ip.parse().unwrap();
-        Arc::new(TcpStream::connect((ip, peer.port)).await?)
+        TcpStream::connect((ip, peer.port)).await?
     };
-    // let (mut ipc_sender, mut ipcs) = mpsc::channel(10);
+
     let (mut writer_sender, mut writer_receiver) = mpsc::channel(10);
 
     let mut peer_conn = PeerConnection {
@@ -261,28 +295,11 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
         manager_sender,
     };
 
-    if send_handshake_first {
-        peer_conn.send_handshake().await?;
-        peer_conn.receive_handshake().await?;
-    } else {
-        peer_conn.receive_handshake().await?;
-        peer_conn.send_handshake().await?;
-    }
+    peer_conn.handshake(send_handshake_first).await?;
 
-    let stream = Arc::clone(&peer_conn.stream);
-    let ipc_sender1 = ipc_sender.clone();
-    let (shutdown_sender, shutdown) = mpsc::channel(1);
-    spawn_and_log_error(async move {
-        let e = conn_read_loop(stream, ipc_sender1, shutdown_sender).await;
-        println!("conn_read_loop over!");
-        e
-    });
-    let stream = Arc::clone(&peer_conn.stream);
-    let write_handle = spawn_and_log_error(async move {
-        let e = conn_write_loop(writer_receiver, stream, ipc_sender).await;
-        println!("conn_write_loop over!");
-        e
-    });
+    let shutdown = start_read_loop(peer_conn.stream.clone(), ipc_sender.clone());
+    let write_handle = start_write_loop(peer_conn.stream.clone(), ipc_sender, writer_receiver);
+
     // send a bitfield message letting peer know what we have
     peer_conn.send_bitfield().await?;
 
@@ -337,8 +354,8 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String,
 #[derive(Debug)]
 enum Void {}
 
-async fn conn_read_loop(stream: Arc<TcpStream>, mut sender: Sender<IPC>, _shutdown: Sender<Void>) -> Result<()> {
-    let mut stream = &*stream;
+async fn conn_read_loop(mut stream: TcpStream, mut sender: Sender<IPC>, _shutdown: Sender<Void>) -> Result<()> {
+    let stream = &mut stream;
     // let message_size = ;
     println!("task {}: conn_read_loop", task::current().id());
     // let mut buf = vec![0; 4];
@@ -357,8 +374,8 @@ async fn conn_read_loop(stream: Arc<TcpStream>, mut sender: Sender<IPC>, _shutdo
     Ok(())
 }
 
-async fn conn_write_loop(mut messages: Receiver<Message>, stream: Arc<TcpStream>, mut sender: Sender<IPC>) -> Result<()> {
-    let mut stream = &*stream;
+async fn conn_write_loop(mut messages: Receiver<Message>, mut stream: TcpStream, mut sender: Sender<IPC>) -> Result<()> {
+    // let mut stream = &mut stream;
     let mut messages = messages.fuse();
     println!("task {}: conn_write_loop", task::current().id());
     loop {
@@ -458,7 +475,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
     Ok(())
 }
 
-async fn read_n(mut stream: &TcpStream, bytes_to_read: u32) -> Result<Vec<u8>> {
+async fn read_n(stream: &mut TcpStream, bytes_to_read: u32) -> Result<Vec<u8>> {
     // let mut stream = &*stream;
     let mut buf = vec![0; bytes_to_read as usize];
     stream.read_exact(&mut buf).await?;
