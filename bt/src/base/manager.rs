@@ -78,21 +78,19 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         }
     }
 
-    let (disconnect_sender, mut disconnect_receiver) =
-        mpsc::channel(10);
-    let mut events_from_conn = events_from_conn.fuse();
-    let mut events_from_download = events_from_download.fuse();
+    let (disconnect_sender, mut disconnect_receiver) = mpsc::channel(10);
+
     loop {
         let event = select! {
-            event = events_from_download.next().fuse() => match event {
+            event = events_from_download.next() => match event {
                 Some(event) => event,
                 None => break,
             },
-            event = events_from_conn.next().fuse() => match event {
+            event = events_from_conn.next() => match event {
                 Some(event) => event,
                 None => break,
             },
-            disconnect = disconnect_receiver.next().fuse() => {
+            disconnect = disconnect_receiver.next() => {
                 let peer = disconnect.unwrap();
                 println!("remove {:?}", peer);
                 assert!(peers.remove(&peer).is_some());
@@ -120,6 +118,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                                   manager.meta_info.info_hash(), peer.clone(),
                                   peer_sender.clone(), peer_receiver, sender_from_conn.clone());
                     let mut disconnect_sender = disconnect_sender.clone();
+                    // start peer conn loop
                     spawn_and_log_error(async move {
                         let peer = params.3.clone();
                         let res = peer_conn_loop(params.0, params.1,

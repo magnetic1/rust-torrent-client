@@ -16,6 +16,21 @@ use hyper::{
 use url::percent_encoding::{percent_encode, FORM_URLENCODED_ENCODE_SET};
 use parallel_stream::prelude::*;
 
+pub async fn tracker_loop() {
+
+}
+
+
+async fn announces_first_search(t: &TorrentMetaInfo) {
+    let mut announce_list = t.announce_list.clone().unwrap();
+
+    for tier in &mut announce_list {
+        for announce in tier {
+
+        }
+    }
+}
+
 pub async fn get_peer(t: &TorrentMetaInfo) {
     let announces = match t.announce_list {
         Some(ref v) => {
