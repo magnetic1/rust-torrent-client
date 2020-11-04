@@ -15,19 +15,42 @@ use hyper::{
 };
 use url::percent_encoding::{percent_encode, FORM_URLENCODED_ENCODE_SET};
 use parallel_stream::prelude::*;
+use rand::Rng;
+use std::error::Error;
 
-pub async fn tracker_loop() {
-
-}
+pub async fn tracker_loop() {}
 
 
-async fn announces_first_search(t: &TorrentMetaInfo) {
-    let mut announce_list = t.announce_list.clone().unwrap();
+async fn announce_list_first_search(announce_list: &mut Vec<Vec<String>>, peer_id: &str,
+                                    meta_info: &TorrentMetaInfo, listener_port: u16) {
+    for tier in announce_list {
+        knuth_shuffle(tier);
 
-    for tier in &mut announce_list {
         for announce in tier {
+            // try announce
+            let result = try_announce(announce, peer_id, meta_info: &TorrentMetaInfo, listener_port: u16).await;
+            let response = match result {
+                Err(_) => continue,
+                Ok(response) => response,
+            };
+
 
         }
+    }
+}
+
+async fn try_announce(announce: &mut String, peer_id: &str,
+                      meta_info: &TorrentMetaInfo, listener_port: u16) -> Result<TrackerResponse> {
+    let info_hash = &meta_info.info_hash().0;
+    get_tracker_response(peer_id, announce, meta_info.length(), info_hash, listener_port).await
+}
+
+fn knuth_shuffle<T>(list: &mut [T]) {
+    let mut rng = rand::thread_rng();
+
+    for i in 0..list.len() {
+        let k = list.len() - i - 1;
+        list.swap(k, rng.gen_range(0, k));
     }
 }
 
@@ -92,14 +115,16 @@ async fn get_tracker_response(peer_id: &str, announce: &str, length: u64,
     Ok(res)
 }
 
-pub async fn get_tracker_response_by_metainfo(peer_id: &str, metainfo: &TorrentMetaInfo, listener_port: u16) -> Result<TrackerResponse> {
-    let announce = "http://explodie.org:6969/announce";
-    let info_hash = &metainfo.info_hash().0;
-    get_tracker_response(peer_id, announce, metainfo.length(), info_hash, listener_port).await
+pub async fn get_tracker_response_by_meta_info(announce: &str, peer_id: &str,
+                                               meta_info: &TorrentMetaInfo,
+                                               listener_port: u16) -> Result<TrackerResponse> {
+    let info_hash = &meta_info.info_hash().0;
+    get_tracker_response(peer_id, announce, meta_info.length(), info_hash, listener_port).await
 }
 
 pub async fn get_peers(peer_id: &str, metainfo: &TorrentMetaInfo, listener_port: u16) -> Result<Vec<Peer>> {
-    let res = get_tracker_response_by_metainfo(peer_id, metainfo, listener_port).await?;
+    let announce = "http://explodie.org:6969/announce";
+    let res = get_tracker_response_by_meta_info(announce, peer_id, metainfo, listener_port).await?;
     Ok(res.peers)
 }
 
