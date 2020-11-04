@@ -28,7 +28,7 @@ async fn announce_list_first_search(announce_list: &mut Vec<Vec<String>>, peer_i
 
         for announce in tier {
             // try announce
-            let result = try_announce(announce, peer_id, meta_info: &TorrentMetaInfo, listener_port: u16).await;
+            let result = try_announce(announce, peer_id, meta_info, listener_port).await;
             let response = match result {
                 Err(_) => continue,
                 Ok(response) => response,
