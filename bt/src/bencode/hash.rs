@@ -120,7 +120,7 @@ fn list_test() {
 }
 
 
-fn swap_to_head<T>(list: &mut [T], n: usize) {
+pub fn swap_to_head<T>(list: &mut [T], n: usize) {
     for i in 0..n {
         list.swap(n - i, n - i - 1);
     }
