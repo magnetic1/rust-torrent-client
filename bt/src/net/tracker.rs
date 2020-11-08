@@ -18,48 +18,80 @@ use rand::Rng;
 use std::error::Error;
 use std::convert::TryFrom;
 use std::time::Duration;
+use futures::channel::mpsc::UnboundedSender;
+use crate::base::manager::ManagerEvent;
+use futures::SinkExt;
+use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Debug)]
 pub struct TrackerSupervisor {
     meta_info: TorrentMetaInfo,
+    sender: UnboundedSender<ManagerEvent>,
+    peer_id: String,
+    listener_port: u16,
+}
+
+#[derive(Debug)]
+pub enum TrackerMessage {
+    Peers(Vec<Peer>),
 }
 
 impl TrackerSupervisor {
-    pub fn new(meta_info: TorrentMetaInfo) -> TrackerSupervisor {
+    pub fn new(meta_info: TorrentMetaInfo, peer_id: String,
+               listener_port: u16, sender: UnboundedSender<ManagerEvent>) -> TrackerSupervisor {
         TrackerSupervisor {
             meta_info,
+            sender,
+            peer_id,
+            listener_port,
         }
     }
 
-    pub async fn start(&mut self, peer_id: &str,
-                              meta_info: &TorrentMetaInfo, listener_port: u16) {
-        match &mut self.meta_info.announce_list {
-            Some(announce_list) => {
-                tracker_loop()
-            }
-            None => {
-                // todo: without announce-list
-                panic!("announce unfinished!")
-            }
+    fn has_announce_list(&self) -> bool {
+        match &self.meta_info.announce_list {
+            Some(_) => true,
+            None => false
         }
     }
 
-    pub async fn tracker_loop(announce_list: &mut Vec<Vec<String>>, peer_id: &str,
-                              meta_info: &TorrentMetaInfo, listener_port: u16) {
+    pub async fn start(&mut self) -> Result<()> {
+
+        if self.has_announce_list() {
+            TrackerSupervisor::tracker_loop(self).await;
+        } else {
+            // todo: without announce-list
+            panic!("announce unfinished!")
+        }
+        Ok(())
+    }
+
+
+    pub async fn tracker_loop(t_supervisor: &mut TrackerSupervisor) -> Result<()> {
+        // let announce_list = &mut t_supervisor.meta_info.announce_list.unwrap();
+        let peer_id = &mut t_supervisor.peer_id;
+        let meta_info = &mut t_supervisor.meta_info;
+        let announce_list = meta_info.announce_list.as_mut().unwrap();
+
         shuffle_announce_list(announce_list);
 
-        match announce_list_try(announce_list, peer_id, meta_info, listener_port).await {
-            Ok(tracker_response) => {
+        loop {
+            match announce_list_try(peer_id, meta_info, t_supervisor.listener_port).await {
+                Ok(tracker_response) => {
+                    let peers = tracker_response.peers;
+                    t_supervisor.sender.send(ManagerEvent::Tracker(TrackerMessage::Peers(peers))).await?;
 
+                }
+                Err(_) => {
+                    async_std::task::sleep(Duration::from_secs(5)).await;
+                    continue;
+                },
             }
-            Err(_) => async_std::task::sleep(Duration::from_secs(5)).await,
+            async_std::task::sleep(Duration::from_secs(30)).await;
         }
     }
 }
-
-
 
 fn shuffle_announce_list(announce_list: &mut Vec<Vec<String>>) {
     for tier in announce_list {
@@ -67,13 +99,16 @@ fn shuffle_announce_list(announce_list: &mut Vec<Vec<String>>) {
     }
 }
 
-async fn announce_list_try(announce_list: &mut Vec<Vec<String>>, peer_id: &str,
-                           meta_info: &TorrentMetaInfo, listener_port: u16) -> Result<TrackerResponse> {
+async fn announce_list_try(peer_id: &str, meta_info: &mut TorrentMetaInfo, listener_port: u16) -> Result<TrackerResponse> {
+    let info_hash = &meta_info.info_hash().0;
+    let len = meta_info.length();
+    let announce_list = meta_info.announce_list.as_mut().unwrap();
     let mut error: Box<dyn Error + Send + Sync> = Box::try_from("announce_list is empty").unwrap();
+
     for tier in announce_list {
         for (i, announce) in tier.iter().enumerate() {
             // try announce
-            let result = try_announce(announce, peer_id, meta_info, listener_port).await;
+            let result = try_announce(announce, peer_id, info_hash, len,  listener_port).await;
             error = match result {
                 Err(e) => e,
                 Ok(response) => {
@@ -86,10 +121,8 @@ async fn announce_list_try(announce_list: &mut Vec<Vec<String>>, peer_id: &str,
     Err(error)
 }
 
-async fn try_announce(announce: &str, peer_id: &str,
-                      meta_info: &TorrentMetaInfo, listener_port: u16) -> Result<TrackerResponse> {
-    let info_hash = &meta_info.info_hash().0;
-    get_tracker_response(peer_id, announce, meta_info.length(), info_hash, listener_port).await
+async fn try_announce(announce: &str, peer_id: &str, info_hash: &[u8; 20], length: u64, listener_port: u16) -> Result<TrackerResponse> {
+    get_tracker_response(peer_id, announce, length, info_hash, listener_port).await
 }
 
 fn knuth_shuffle<T>(list: &mut [T]) {

@@ -19,6 +19,7 @@ use crate::{
     base::spawn_and_log_error,
 };
 use std::collections::HashMap;
+use crate::net::tracker::TrackerMessage;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -148,6 +149,10 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                 }
             }
 
+            ManagerEvent::Tracker(trackerMessage) => {
+                panic!("unfinished");
+            }
+
             e => sender_to_download.send(e).await?,
 
             // ManagerEvent::RequireData(_, _) => {}
@@ -173,4 +178,6 @@ pub enum ManagerEvent {
     RequireData(RequestMetadata, futures::channel::oneshot::Sender<Vec<u8>>),
     RequireIncompleteBlocks(u32, futures::channel::oneshot::Sender<Vec<(u32, u32)>>),
     RequireHavePieces(futures::channel::oneshot::Sender<Vec<bool>>),
+
+    Tracker(TrackerMessage),
 }
