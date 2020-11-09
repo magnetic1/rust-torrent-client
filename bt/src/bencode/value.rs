@@ -249,8 +249,10 @@ fn from_value() {
 fn into_value() {
     let f = fs::read(
         // "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
-        r#"C:\Users\12287\Downloads\[桜都字幕组][碧蓝航线_Azur Lane][01-12 END][GB][1080P].torrent"#
+        // r#"C:\Users\12287\Downloads\[桜都字幕组][碧蓝航线_Azur Lane][01-12 END][GB][1080P].torrent"#
+        r#"C:\Users\wzq\Downloads\[K&W][Gundam Build Divers Re-RISE][PV-Just before resumed!-][BIG5][720P][x264_AAC].mp4.torrent"#
     ).unwrap();
+
     let mut decoder = Decoder::new(f.as_slice());
 
     let v = Value::decode(&mut decoder).unwrap();
@@ -259,6 +261,7 @@ fn into_value() {
 
     match s {
         Ok(meta_info) => {
+            println!("{:#?}", meta_info);
             if let Info::Multi(multi_info) = meta_info.info {
                 let v = multi_info.pieces.into_value();
                 // println!("{}", v);

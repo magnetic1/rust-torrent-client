@@ -19,7 +19,7 @@ use crate::{
     base::spawn_and_log_error,
 };
 use std::collections::HashMap;
-use crate::net::tracker::TrackerMessage;
+use crate::net::tracker::{TrackerMessage, TrackerSupervisor};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -34,8 +34,8 @@ pub struct Manager {
 
 pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
     let (mut sender_to_download, mut download_receiver) = mpsc::channel(10);
-    let (mut sender_from_conn, mut events_from_conn) = mpsc::unbounded();
-    let (mut sender_from_download, mut events_from_download) = mpsc::unbounded();
+    let (mut sender_unbounded, mut events_unbounded) = mpsc::unbounded();
+    // let (mut sender_unbounded, mut events_unbounded) = mpsc::unbounded();
     let mut peers: HashMap<Peer, Sender<IPC>> = HashMap::new();
 
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
@@ -63,34 +63,44 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     };
 
     let _down_handle = spawn_and_log_error(
-        download_loop(download_receiver, sender_from_download,
+        download_loop(download_receiver, sender_unbounded.clone(),
                       Arc::clone(&manager.files), manager.file_offsets.clone(),
                       manager.our_peer_id.clone(), manager.meta_info.clone())
     );
 
-    {
-        let mut ps = Vec::new();
-        ps.push(Peer {
-            ip: "127.0.0.1".to_string(),
-            port: 54682,
-        });
-        for p in ps {
-            sender_from_conn.send(ManagerEvent::Connection(true, p)).await?;
-        }
-    }
+    let mut tracker_supervisor = TrackerSupervisor::new(
+        manager.meta_info.clone(), manager.our_peer_id.clone(),
+        54654, sender_unbounded.clone()
+    );
+    let _tracker_handle = spawn_and_log_error( async move {
+        let res = tracker_supervisor.start().await;
+        println!("tracker supervisor finished");
+        res
+    });
+
+    // {
+    //     let mut ps = Vec::new();
+    //     ps.push(Peer {
+    //         ip: "127.0.0.1".to_string(),
+    //         port: 54682,
+    //     });
+    //     for p in ps {
+    //         sender_unbounded.send(ManagerEvent::Connection(true, p)).await?;
+    //     }
+    // }
 
     let (disconnect_sender, mut disconnect_receiver) = mpsc::channel(10);
 
     loop {
         let event = select! {
-            event = events_from_download.next() => match event {
+            event = events_unbounded.next() => match event {
                 Some(event) => event,
                 None => break,
             },
-            event = events_from_conn.next() => match event {
-                Some(event) => event,
-                None => break,
-            },
+            // event = events_unbounded.next() => match event {
+            //     Some(event) => event,
+            //     None => break,
+            // },
             disconnect = disconnect_receiver.next() => {
                 let peer = disconnect.unwrap();
                 println!("remove {:?}", peer);
@@ -117,7 +127,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                     let (peer_sender, peer_receiver) = mpsc::channel(10);
                     let params = (send_handshake_first, our_peer_id.clone(),
                                   manager.meta_info.info_hash(), peer.clone(),
-                                  peer_sender.clone(), peer_receiver, sender_from_conn.clone());
+                                  peer_sender.clone(), peer_receiver, sender_unbounded.clone());
                     let mut disconnect_sender = disconnect_sender.clone();
                     // start peer conn loop
                     spawn_and_log_error(async move {
@@ -150,7 +160,13 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
             }
 
             ManagerEvent::Tracker(trackerMessage) => {
-                panic!("unfinished");
+                match trackerMessage {
+                    TrackerMessage::Peers(peers) => {
+                        for p in peers {
+                            sender_unbounded.send(ManagerEvent::Connection(true, p)).await?;
+                        }
+                    }
+                }
             }
 
             e => sender_to_download.send(e).await?,
