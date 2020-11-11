@@ -75,6 +75,7 @@ pub struct PeerConnection {
 
     writer_sender: Sender<Message>,
     manager_sender: UnboundedSender<ManagerEvent>,
+    require: Sender<ManagerEvent>,
 }
 
 impl PeerConnection {
@@ -181,7 +182,7 @@ impl PeerConnection {
             Some(r) => {
                 let data = {
                     let (sender, receiver) = futures::channel::oneshot::channel();
-                    self.manager_sender.send(ManagerEvent::RequireData(r.clone(), sender)).await?;
+                    self.require.send(ManagerEvent::RequireData(r.clone(), sender)).await?;
                     receiver.await?
                 };
                 self.upload_in_progress = true;
@@ -195,7 +196,7 @@ impl PeerConnection {
     async fn queue_blocks(&mut self, piece_index: u32) -> Result<()> {
         let incomplete_blocks = {
             let (sender, receiver) = futures::channel::oneshot::channel();
-            self.manager_sender.send(ManagerEvent::RequireIncompleteBlocks(piece_index, sender)).await?;
+            self.require.send(ManagerEvent::RequireIncompleteBlocks(piece_index, sender)).await?;
             receiver.await?
         };
 
@@ -267,10 +268,11 @@ fn start_write_loop(mut stream: TcpStream, mut ipc_sender: Sender<IPC>, mut writ
 pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String, info_hash: Sha1,
                             peer: Peer, mut ipc_sender: Sender<IPC>, mut ipcs: Receiver<IPC>,
                             mut manager_sender: UnboundedSender<ManagerEvent>,
+                            mut require: Sender<ManagerEvent>,
 ) -> Result<()> {
     let have_pieces = {
         let (sender, receiver) = futures::channel::oneshot::channel();
-        manager_sender.send(ManagerEvent::RequireHavePieces(sender)).await?;
+        require.send(ManagerEvent::RequireHavePieces(sender)).await?;
         receiver.await?
     };
     let num_pieces = have_pieces.len();
@@ -293,6 +295,7 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String, inf
         upload_in_progress: false,
         writer_sender,
         manager_sender,
+        require,
     };
 
     peer_conn.handshake(send_handshake_first).await?;
@@ -364,6 +367,9 @@ async fn conn_read_loop(mut stream: TcpStream, mut sender: Sender<IPC>, _shutdow
             // println!("{:?}: stream message len: {}", task::current().id(), message_size);
             let message = read_n(stream, message_size).await?;
             Message::new(&message[0], &message[1..])
+            // let m = Message::new(&message[0], &message[1..]);
+            // println!("{:?}", m);
+            // m
         } else {
             Message::KeepAlive
         };

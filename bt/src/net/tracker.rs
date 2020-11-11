@@ -22,6 +22,7 @@ use futures::channel::mpsc::UnboundedSender;
 use crate::base::manager::ManagerEvent;
 use futures::SinkExt;
 use std::sync::Arc;
+use async_std::sync::Mutex;
 
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -96,28 +97,70 @@ impl TrackerSupervisor {
         // let announce_list = &mut t_supervisor.meta_info.announce_list.unwrap();
         let peer_id = &mut self.peer_id;
         let meta_info = &mut self.meta_info;
-        let announce_list = meta_info.announce_list.as_mut().unwrap();
 
+        let len = meta_info.length();
+        let info_hash = meta_info.info_hash().0.clone();
+        let listener_port = self.listener_port;
+
+        let announce_list = meta_info.announce_list.as_mut().unwrap();
         shuffle_announce_list(announce_list);
-        announce_list[0][0] = String::from("http://nyaa.tracker.wf:7777/announce");
-        loop {
-            match announce_list_try(peer_id, meta_info, self.listener_port).await {
-                Ok(tracker_response) => {
-                    let peers = tracker_response.peers;
-                    // let mut peers = Vec::new();
-                    // peers.push(Peer {
-                    //     ip: "127.0.0.1".to_string(),
-                    //     port: 54682
-                    // });
-                    self.sender.send(ManagerEvent::Tracker(TrackerMessage::Peers(peers))).await?;
-                },
-                Err(_) => {
-                    async_std::task::sleep(Duration::from_secs(5)).await;
-                    continue;
-                },
+
+        // let announce_list = Arc::new(Mutex::new(announce_list));
+        // announce_list[0][0] = String::from("http://nyaa.tracker.wf:7777/announce");
+        // let mut peers = Vec::new();
+        // peers.push(Peer {
+        //     ip: "127.0.0.1".to_string(),
+        //     port: 54682
+        // });
+        // self.sender.send(ManagerEvent::Tracker(TrackerMessage::Peers(peers))).await?;
+
+        let mut handles = Vec::new();
+        for tier in announce_list {
+            for (i, announce) in tier.iter().enumerate() {
+                let mut sender = self.sender.clone();
+                let announce = announce.to_owned();
+                let peer_id = peer_id.to_owned();
+                // try announce
+                let h = async_std::task::spawn(async move {
+                    loop {
+                        println!("try {}", announce);
+                        let result = try_announce(&announce, &peer_id, &info_hash, len,  listener_port).await;
+                        match result {
+                            Err(e) => {
+                                println!("error: {}", e);
+                                break;
+                            }
+                            Ok(response) => {
+                                let peers = response.peers;
+                                sender.send(ManagerEvent::Tracker(TrackerMessage::Peers(peers))).await;
+                            }
+                        };
+                        async_std::task::sleep(Duration::from_secs(60 * 60 * 5)).await;
+                    };
+                    ()
+                });
+                handles.push(h);
             }
-            async_std::task::sleep(Duration::from_secs(30)).await;
         }
+
+        for h in handles {
+            h.await;
+        }
+
+        Ok(())
+        // loop {
+        //     match announce_list_try(peer_id, meta_info, self.listener_port).await {
+        //         Ok(tracker_response) => {
+        //             let peers = tracker_response.peers;
+        //             self.sender.send(ManagerEvent::Tracker(TrackerMessage::Peers(peers))).await?;
+        //         },
+        //         Err(_) => {
+        //             async_std::task::sleep(Duration::from_secs(5)).await;
+        //             continue;
+        //         },
+        //     }
+        //     async_std::task::sleep(Duration::from_secs(30)).await;
+        // }
     }
 }
 
@@ -360,7 +403,10 @@ impl FromValue for TrackerResponse {
             Value::Bytes(b) => {
                 b.chunks(6).map(Peer::from_bytes).collect()
             }
-            _ => Err(DecodeError::ExtraneousData)?,
+            v => {
+                println!("{:#?}", v);
+                Err(DecodeError::ExtraneousData)?
+            },
         };
 
         let response = TrackerResponse {

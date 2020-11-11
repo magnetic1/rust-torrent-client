@@ -239,12 +239,12 @@ pub async fn download_loop(mut rx: Receiver<ManagerEvent>, mut manager_sender: U
     };
 
     while let Some(event) = rx.next().await {
-        // println!("download loop: {:?}", event);
+        println!("download loop: {:?}", event);
         match event {
             ManagerEvent::Download(Message::Piece(piece_index, offset, data)) => {
                 let block_index = offset / BLOCK_SIZE;
                 download.store(piece_index, block_index, data).await?;
-                // println!("finish store block: (Piece({}, {}, size=16384))", piece_index, offset);
+                println!("finish store block: (Piece({}, {}, size=16384))", piece_index, offset);
             }
             ManagerEvent::RequireData(request_data, sender) => {
                 let buf = download.retrieve_data(request_data).await?;
