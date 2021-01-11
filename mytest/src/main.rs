@@ -49,7 +49,7 @@ fn main() -> Result<()> {
     printer.print_log("------start------");
 
     thread::sleep(Duration::from_millis(1500));
-    // printer.fresh_state(State::Magenta("1█".to_string()))?;
+    printer.fresh_state(State::Magenta("1█".to_string()))?;
     for i in 0..20 {
         thread::sleep(Duration::from_millis(500));
         printer.print_log(&*format!("{}", i))?;
