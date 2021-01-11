@@ -1,16 +1,18 @@
-use std::io::{Write, stdout, Stdout};
-use crossterm::{ExecutableCommand, QueueableCommand, terminal, cursor, style::{self, Colorize}, Result, Command};
-use std::thread::Thread;
-use std::{thread, fmt, result};
-use std::time::Duration;
-use crossterm::style::{Styler, Print};
-use std::fmt::Display;
 use crate::State::Magenta;
-
+use crossterm::style::{Print, Styler};
+use crossterm::{
+    cursor,
+    style::{self, Colorize},
+    terminal, Command, ExecutableCommand, QueueableCommand, Result,
+};
+use std::fmt::Display;
+use std::io::{stdout, Stdout, Write};
+use std::thread::Thread;
+use std::time::Duration;
+use std::{fmt, result, thread};
 
 fn main() -> Result<()> {
     let mut stdout = stdout();
-
 
     // in this loop we are more efficient by not flushing the buffer.
     // stdout.execute(Print("----------start---------\n"))?;
@@ -47,7 +49,7 @@ fn main() -> Result<()> {
     printer.print_log("------start------");
 
     thread::sleep(Duration::from_millis(1500));
-    printer.fresh_state(State::Magenta("1█".to_string()))?;
+    // printer.fresh_state(State::Magenta("1█".to_string()))?;
     for i in 0..20 {
         thread::sleep(Duration::from_millis(500));
         printer.print_log(&*format!("{}", i))?;
@@ -112,7 +114,8 @@ impl Printer {
     fn clear_state(&mut self) -> Result<()> {
         let mut log_cursor = cursor::position()?.1 - self.state_lines + 1;
         self.stdout.execute(cursor::MoveTo(0, log_cursor))?;
-        self.stdout.execute(terminal::Clear(terminal::ClearType::FromCursorDown))?;
+        self.stdout
+            .execute(terminal::Clear(terminal::ClearType::FromCursorDown))?;
         Ok(())
     }
 }

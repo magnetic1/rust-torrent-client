@@ -1,36 +1,34 @@
-use std::fs;
-use async_std::{
-    io,
-    task,
-    path::Path,
-    prelude::*,
-    io::prelude::*,
-    fs::{File, OpenOptions},
-    sync::{Arc, Mutex, MutexGuard},
-};
-use futures::{
-    StreamExt,
-    sink::SinkExt,
-    channel::mpsc,
-    prelude::stream::FuturesUnordered,
-    channel::mpsc::{Sender, Receiver}
-};
 use crate::{
-    require_oneshot,
+    base::{
+        ipc::{Message, IPC},
+        manager::ManagerEvent,
+        meta_info::{Info, TorrentMetaInfo},
+        Result,
+    },
     bencode::hash::Sha1,
     net::peer_connection::RequestMetadata,
-    base::{
-        Result,
-        manager::ManagerEvent,
-        ipc::{Message, IPC},
-        meta_info::{TorrentMetaInfo, Info}
-    },
+    require_oneshot,
+};
+use async_std::{
+    fs::{File, OpenOptions},
+    io,
+    io::prelude::*,
+    path::Path,
+    prelude::*,
+    sync::{Arc, Mutex, MutexGuard},
+    task,
 };
 use futures::channel::mpsc::UnboundedSender;
-
+use futures::{
+    channel::mpsc,
+    channel::mpsc::{Receiver, Sender},
+    prelude::stream::FuturesUnordered,
+    sink::SinkExt,
+    StreamExt,
+};
+use std::fs;
 
 pub const BLOCK_SIZE: u32 = 16 * 1024;
-
 
 struct Block {
     index: u32,
@@ -71,7 +69,13 @@ impl Piece {
             blocks.push(Block::new(i as u32, len));
         }
 
-        Piece { length, offset, hash, blocks, is_complete: false }
+        Piece {
+            length,
+            offset,
+            hash,
+            blocks,
+            is_complete: false,
+        }
     }
 
     fn has_block(&self, block_index: u32) -> bool {
@@ -79,9 +83,7 @@ impl Piece {
     }
 
     fn has_all_blocks(&self) -> bool {
-        self.blocks.iter().all(|b| {
-            b.is_complete
-        })
+        self.blocks.iter().all(|b| b.is_complete)
     }
 
     fn reset_blocks(&mut self) {
@@ -102,7 +104,12 @@ pub struct Download {
 }
 
 impl Download {
-    pub(crate) async fn store(&mut self, piece_index: u32, block_index: u32, data: Vec<u8>) -> Result<()> {
+    pub(crate) async fn store(
+        &mut self,
+        piece_index: u32,
+        block_index: u32,
+        data: Vec<u8>,
+    ) -> Result<()> {
         let piece = &mut self.pieces[piece_index as usize];
 
         if piece.has_block(block_index) || piece.is_complete {
@@ -111,7 +118,14 @@ impl Download {
         }
         // println!("file_offsets: {} {} {}", self.file_offsets[0], self.file_offsets[1] ,self.file_offsets[2]);
         // println!("{}: {}", piece_index, block_index);
-        store_block(&**self.files, &self.file_offsets, piece.offset, block_index, &data).await?;
+        store_block(
+            &**self.files,
+            &self.file_offsets,
+            piece.offset,
+            block_index,
+            &data,
+        )
+        .await?;
         // println!("store_block： {} {}", piece_index, block_index);
 
         piece.blocks[block_index as usize].is_complete = true;
@@ -131,17 +145,18 @@ impl Download {
 
         // println!("BlockComplete： {} {}", piece_index, block_index);
         // notify peers that this block is complete
-        self.broadcast(IPC::BlockComplete(piece_index, block_index)).await?;
+        self.broadcast(IPC::BlockComplete(piece_index, block_index))
+            .await?;
         // println!("block {} complete", block_index);
         // notify peers if piece is complete
         if self.pieces[piece_index as usize].is_complete {
             println!("Piece {} complete", piece_index);
-            self.broadcast(IPC::PieceComplete(piece_index)).await;
+            self.broadcast(IPC::PieceComplete(piece_index)).await?;
         }
         // notify peers if download is complete
         if self.is_complete() {
             println!("Download complete");
-            self.broadcast(IPC::DownloadComplete).await;
+            self.broadcast(IPC::DownloadComplete).await?;
         }
 
         Ok(())
@@ -162,13 +177,13 @@ impl Download {
             let contained_pieces = &self.pieces[low..=high];
             // println!("low {} high {}", low, high);
 
-            let file_is_complete = contained_pieces.iter().all(|p| {
-                p.is_complete
-            });
+            let file_is_complete = contained_pieces.iter().all(|p| p.is_complete);
 
             if file_is_complete {
                 println!("{}: file_is_complete", i + index);
-                self.manager_sender.send(ManagerEvent::FileFinish(i + index)).await?;
+                self.manager_sender
+                    .send(ManagerEvent::FileFinish(i + index))
+                    .await?;
             }
         }
         Ok(())
@@ -179,7 +194,13 @@ impl Download {
 
         if piece.is_complete {
             let offset = piece.offset + request.offset as u64;
-            let buf = read(&**self.files, &self.file_offsets, offset, request.block_length).await?;
+            let buf = read(
+                &**self.files,
+                &self.file_offsets,
+                offset,
+                request.block_length,
+            )
+            .await?;
             Ok(buf)
         } else {
             Err("Error::MissingPieceData")?
@@ -189,7 +210,9 @@ impl Download {
     fn incomplete_blocks_for_piece(&self, piece_index: u32) -> Vec<(u32, u32)> {
         let ref piece = self.pieces[piece_index as usize];
         if !piece.is_complete {
-            piece.blocks.iter()
+            piece
+                .blocks
+                .iter()
                 .filter(|&b| !b.is_complete)
                 .map(|b| (b.index, b.length))
                 .collect()
@@ -199,13 +222,13 @@ impl Download {
     }
 
     fn is_complete(&self) -> bool {
-        self.pieces.iter().all(|piece| {
-            piece.is_complete
-        })
+        self.pieces.iter().all(|piece| piece.is_complete)
     }
 
     async fn broadcast(&mut self, ipc: IPC) -> Result<()> {
-        self.manager_sender.send(ManagerEvent::Broadcast(ipc)).await?;
+        self.manager_sender
+            .send(ManagerEvent::Broadcast(ipc))
+            .await?;
         Ok(())
     }
 
@@ -218,9 +241,14 @@ impl Download {
     }
 }
 
-pub async fn download_loop(mut rx: Receiver<ManagerEvent>, mut manager_sender: UnboundedSender<ManagerEvent>,
-                           files: Arc<Vec<Arc<Mutex<File>>>>, file_offsets: Vec<u64>,
-                           our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
+pub async fn download_loop(
+    mut rx: Receiver<ManagerEvent>,
+    mut manager_sender: UnboundedSender<ManagerEvent>,
+    files: Arc<Vec<Arc<Mutex<File>>>>,
+    file_offsets: Vec<u64>,
+    our_peer_id: String,
+    meta_info: TorrentMetaInfo,
+) -> Result<()> {
     // let file_infos = download_inline::create_file_infos(&meta_info.info).await;
 
     // let (file_offsets, file_paths, files)
@@ -244,7 +272,10 @@ pub async fn download_loop(mut rx: Receiver<ManagerEvent>, mut manager_sender: U
             ManagerEvent::Download(Message::Piece(piece_index, offset, data)) => {
                 let block_index = offset / BLOCK_SIZE;
                 download.store(piece_index, block_index, data).await?;
-                println!("finish store block: (Piece({}, {}, size=16384))", piece_index, offset);
+                println!(
+                    "finish store block: (Piece({}, {}, size=16384))",
+                    piece_index, offset
+                );
             }
             ManagerEvent::RequireData(request_data, sender) => {
                 let buf = download.retrieve_data(request_data).await?;
@@ -260,12 +291,16 @@ pub async fn download_loop(mut rx: Receiver<ManagerEvent>, mut manager_sender: U
             }
             _ => {}
         }
-    };
+    }
 
     Ok(())
 }
 
-async fn verify(piece: &mut Piece, files: &[Arc<Mutex<File>>], file_offsets: &[u64]) -> Result<bool> {
+async fn verify(
+    piece: &mut Piece,
+    files: &[Arc<Mutex<File>>],
+    file_offsets: &[u64],
+) -> Result<bool> {
     let buffer = read(files, file_offsets, piece.offset, piece.length).await?;
     // println!("read piece: {} {}", piece.offset, piece.length);
 
@@ -279,13 +314,17 @@ async fn verify(piece: &mut Piece, files: &[Arc<Mutex<File>>], file_offsets: &[u
     Ok(piece.is_complete)
 }
 
-pub async fn store_block(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
-                         piece_offset: u64, block_index: u32, data: &[u8]) -> Result<()> {
+pub async fn store_block(
+    files: &[Arc<Mutex<File>>],
+    file_offsets: &[u64],
+    piece_offset: u64,
+    block_index: u32,
+    data: &[u8],
+) -> Result<()> {
     let block_offset = piece_offset + (block_index * BLOCK_SIZE) as u64;
 
     // println!("search_ptrs {} {}", block_offset, data.len());
-    let (i, ptr_vec) =
-        search_ptrs(file_offsets, block_offset, data.len());
+    let (i, ptr_vec) = search_ptrs(file_offsets, block_offset, data.len());
     // println!("finish search_ptrs {} {}", block_offset, data.len());
 
     for (a, (block_ptr, file_ptr, len)) in ptr_vec.into_iter().enumerate() {
@@ -296,19 +335,26 @@ pub async fn store_block(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
     Ok(())
 }
 
-async fn store(file: &mut File, file_ptr: u64,
-               block_ptr: usize, len: usize,
-               data: &[u8]) -> Result<()> {
+async fn store(
+    file: &mut File,
+    file_ptr: u64,
+    block_ptr: usize,
+    len: usize,
+    data: &[u8],
+) -> Result<()> {
     file.seek(io::SeekFrom::Start(file_ptr)).await?;
-    file.write_all(&data[block_ptr.. (block_ptr + len)]).await?;
+    file.write_all(&data[block_ptr..(block_ptr + len)]).await?;
     // println!("store success! {} {}", file_ptr, len);
     Ok(())
 }
 
-async fn read(files: &[Arc<Mutex<File>>], file_offsets: &[u64],
-              offset: u64, len: u32) -> Result<Vec<u8>> {
-    let (i, ptr_vec) =
-        search_ptrs(file_offsets, offset, len as usize);
+async fn read(
+    files: &[Arc<Mutex<File>>],
+    file_offsets: &[u64],
+    offset: u64,
+    len: u32,
+) -> Result<Vec<u8>> {
+    let (i, ptr_vec) = search_ptrs(file_offsets, offset, len as usize);
 
     let mut buffer: Vec<u8> = vec![0; len as usize];
 
@@ -338,7 +384,7 @@ fn search_index(file_offsets: &[u64], offset: u64) -> usize {
         } else {
             left = mid + 1;
         }
-    };
+    }
 
     return right;
 }
@@ -368,20 +414,19 @@ fn search_ptrs(file_offsets: &[u64], offset: u64, len: usize) -> (usize, Vec<(us
         // if i == file_offsets.len() - 1 {
         //     return (index, vec);
         // };
-    };
+    }
 
     vec.push((data_ptr, file_ptr, left as usize));
     return (index, vec);
 }
 
-
 pub mod download_inline {
-    use async_std::sync::{Arc, Mutex};
-    use async_std::fs::{File, OpenOptions};
-    use std::fs;
-    use async_std::path::Path;
     use crate::base::download::Piece;
-    use crate::base::meta_info::{TorrentMetaInfo, Info};
+    use crate::base::meta_info::{Info, TorrentMetaInfo};
+    use async_std::fs::{File, OpenOptions};
+    use async_std::path::Path;
+    use async_std::sync::{Arc, Mutex};
+    use std::fs;
 
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -410,7 +455,9 @@ pub mod download_inline {
         file_infos
     }
 
-    pub(crate) async fn create_files(file_infos: Vec<(u64, String)>) -> Result<(Vec<u64>, Vec<String>, Vec<Arc<Mutex<File>>>)> {
+    pub(crate) async fn create_files(
+        file_infos: Vec<(u64, String)>,
+    ) -> Result<(Vec<u64>, Vec<String>, Vec<Arc<Mutex<File>>>)> {
         // create files and file_offsets
         let mut files = Vec::with_capacity(file_infos.len());
         let mut file_offsets = Vec::with_capacity(file_infos.len() + 1);
@@ -433,7 +480,12 @@ pub mod download_inline {
                 }
             }
 
-            let mut file = OpenOptions::new().create(true).read(true).write(true).open(path).await?;
+            let mut file = OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .open(path)
+                .await?;
             file.set_len(length).await?;
 
             files.push(Arc::new(Mutex::new(file)));
@@ -446,7 +498,10 @@ pub mod download_inline {
         Ok((file_offsets, file_paths, files))
     }
 
-    pub(crate) async fn create_pieces(files_length: u64, meta_info: &TorrentMetaInfo) -> Vec<Piece> {
+    pub(crate) async fn create_pieces(
+        files_length: u64,
+        meta_info: &TorrentMetaInfo,
+    ) -> Vec<Piece> {
         // create pieces
         let piece_length = meta_info.piece_length();
         let num_pieces = meta_info.num_pieces();
@@ -473,10 +528,10 @@ pub mod download_inline {
 
 #[cfg(test)]
 mod test {
+    use crate::bencode::hash::Sha1;
     use std::fs::{File, OpenOptions};
     use std::io;
-    use std::io::{Seek, Read};
-    use crate::bencode::hash::Sha1;
+    use std::io::{Read, Seek};
 
     #[test]
     fn file_test() {
@@ -501,7 +556,6 @@ mod test {
         file_2.seek(io::SeekFrom::Start(0));
         file_2.read(&mut bytes[244_165..262_144]).unwrap();
 
-
         println!("{:?}", Sha1::calculate_sha1(&bytes));
         println!("{:?}", Sha1::calculate_sha1(&my_bytes));
         let mut indexs = vec![];
@@ -517,11 +571,5 @@ mod test {
         println!("{:?}", &bytes[260_549..]);
         // assert_eq!(&bytes, &my_bytes);
         // assert_eq!(Sha1::calculate_sha1(&bytes), Sha1::calculate_sha1(&my_bytes));
-
     }
 }
-
-
-
-
-
