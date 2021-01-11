@@ -26,9 +26,10 @@ parallel-stream = "2.1.1"
 
 bencode = "0.1"
 
-[dev-dependencies]
-tokio-test = "*"
-
 [dependencies.async-std]
 version = "1.6.2"
 features = ["unstable"]
+
+[dev-dependencies]
+tokio-test = "*"
+
