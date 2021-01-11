@@ -59,7 +59,7 @@ fn main() -> Result<()> {
 
 struct Printer {
     stdout: Stdout,
-    log_lines: u16,
+    state_lines: u16,
     state: State,
 }
 
@@ -87,39 +87,32 @@ impl Printer {
     fn new(stdout: Stdout) -> Printer {
         Printer {
             stdout,
-            log_lines: cursor::position().unwrap().1,
+            state_lines: 1,
             state: State::Print("".to_string()),
         }
     }
 
     fn print_log(&mut self, log: &str) -> Result<()> {
-        let mut now = cursor::position()?.1;
+        self.clear_state()?;
 
-        while now >= self.log_lines {
-            self.stdout.execute(terminal::Clear(terminal::ClearType::CurrentLine))?;
-            now = now - 1;
-        }
-        self.stdout.execute(cursor::MoveTo(0, cursor::position()?.1))?;
         self.stdout.execute(Print(format!("{}\n", log)))?;
-
-        self.log_lines = cursor::position()?.1;
         self.state.print_state(&mut self.stdout)?;
 
         Ok(())
     }
 
     fn fresh_state(&mut self, new_state: State) -> Result<()> {
+        self.clear_state()?;
         self.state = new_state;
-
-        let mut now = cursor::position()?.1;
-        while now >= self.log_lines {
-            self.stdout.execute(terminal::Clear(terminal::ClearType::CurrentLine))?;
-            now = now - 1;
-        }
-
-        self.stdout.execute(cursor::MoveTo(0, cursor::position()?.1))?;
         self.state.print_state(&mut self.stdout)?;
 
+        Ok(())
+    }
+
+    fn clear_state(&mut self) -> Result<()> {
+        let mut log_cursor = cursor::position()?.1 - self.state_lines + 1;
+        self.stdout.execute(cursor::MoveTo(0, log_cursor))?;
+        self.stdout.execute(terminal::Clear(terminal::ClearType::FromCursorDown))?;
         Ok(())
     }
 }
