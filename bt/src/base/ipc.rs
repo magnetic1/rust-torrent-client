@@ -7,7 +7,6 @@ pub enum IPC {
     DownloadComplete,
     Message(Message),
     BlockUploaded,
-
 }
 
 #[derive(Clone)]
@@ -53,7 +52,7 @@ impl Message {
                 Message::Cancel(index, offset, length)
             }
             9 => Message::Port,
-            _ => panic!("Bad message id: {}", id)
+            _ => panic!("Bad message id: {}", id),
         }
     }
 
@@ -107,10 +106,10 @@ const BYTE_2: u32 = 256;
 const BYTE_3: u32 = 1;
 
 pub(crate) fn bytes_to_u32(bytes: &[u8]) -> u32 {
-    bytes[0] as u32 * BYTE_0 +
-        bytes[1] as u32 * BYTE_1 +
-        bytes[2] as u32 * BYTE_2 +
-        bytes[3] as u32 * BYTE_3
+    bytes[0] as u32 * BYTE_0
+        + bytes[1] as u32 * BYTE_1
+        + bytes[2] as u32 * BYTE_2
+        + bytes[3] as u32 * BYTE_3
 }
 
 pub(crate) fn u32_to_bytes(integer: u32) -> Vec<u8> {
@@ -134,10 +133,18 @@ impl fmt::Debug for Message {
             Message::Interested => write!(f, "Interested"),
             Message::NotInterested => write!(f, "NotInterested"),
             Message::Have(ref index) => write!(f, "Have({})", index),
-            Message::Bitfield(ref bytes) => write!(f, "Bitfield({:?})", crate::bencode::hash::to_hex(bytes)),
-            Message::Request(ref index, ref offset, ref length) => write!(f, "Request({}, {}, {})", index, offset, length),
-            Message::Piece(ref index, ref offset, ref data) => write!(f, "Piece({}, {}, size={})", index, offset, data.len()),
-            Message::Cancel(ref index, ref offset, ref length) => write!(f, "Cancel({}, {}, {})", index, offset, length),
+            Message::Bitfield(ref bytes) => {
+                write!(f, "Bitfield({:?})", crate::bencode::hash::to_hex(bytes))
+            }
+            Message::Request(ref index, ref offset, ref length) => {
+                write!(f, "Request({}, {}, {})", index, offset, length)
+            }
+            Message::Piece(ref index, ref offset, ref data) => {
+                write!(f, "Piece({}, {}, size={})", index, offset, data.len())
+            }
+            Message::Cancel(ref index, ref offset, ref length) => {
+                write!(f, "Cancel({}, {}, {})", index, offset, length)
+            }
             Message::Port => write!(f, "Port"),
         }
     }

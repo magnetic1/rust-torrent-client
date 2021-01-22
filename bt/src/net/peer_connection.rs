@@ -1,35 +1,28 @@
-use async_std::{
-    task,
-    prelude::*,
-    net::TcpStream,
-    net::Ipv4Addr,
-};
 use crate::{
     base::{
-        ipc::{Message, IPC, bytes_to_u32},
-        spawn_and_log_error,
         download::BLOCK_SIZE,
+        ipc::{bytes_to_u32, Message, IPC},
         manager::ManagerEvent,
-        Result,
+        spawn_and_log_error, Result,
     },
     bencode::{
+        decode::DecodeError,
         hash::Sha1,
         value::{FromValue, Value},
-        decode::DecodeError,
     },
 };
+use async_std::{net::Ipv4Addr, net::TcpStream, prelude::*, task};
 use futures::{
+    channel::mpsc::{self, Receiver, Sender},
     select,
-    FutureExt,
-    StreamExt,
     sink::SinkExt,
-    channel::mpsc::{self, Sender, Receiver},
+    FutureExt, StreamExt,
 };
 use rand::Rng;
-use std::collections::{HashMap};
+use std::collections::HashMap;
 
-use futures::channel::mpsc::UnboundedSender;
 use async_std::task::JoinHandle;
+use futures::channel::mpsc::UnboundedSender;
 
 const PROTOCOL: &'static str = "BitTorrent protocol";
 const MAX_CONCURRENT_REQUESTS: u32 = 10;
@@ -44,7 +37,10 @@ impl Peer {
     pub fn from_bytes(v: &[u8]) -> Peer {
         let ip = Ipv4Addr::new(v[0], v[1], v[2], v[3]);
         let port = (v[4] as u16) * 256 + (v[5] as u16);
-        Peer { ip: ip.to_string(), port }
+        Peer {
+            ip: ip.to_string(),
+            port,
+        }
     }
 }
 
@@ -63,7 +59,6 @@ pub struct PeerConnection {
     our_peer_id: String,
     info_hash: Sha1,
     // send_handshake_first: bool,
-
     stream: TcpStream,
     me: PeerMetadata,
     he: PeerMetadata,
@@ -109,16 +104,15 @@ impl PeerConnection {
     async fn receive_handshake(&mut self) -> Result<()> {
         let stream = &mut self.stream;
 
-        println!("task {}: start receive", task::current().id(), );
+        println!("task {}: start receive", task::current().id(),);
         let pstrlen = read_n(stream, 1).await?;
-        println!("{}: receive pstrlen", task::current().id(), );
+        println!("{}: receive pstrlen", task::current().id(),);
         read_n(stream, pstrlen[0] as u32).await?; // ignore pstr
         read_n(stream, 8).await?; // ignore reserved
         let info_hash = read_n(stream, 20).await?;
         let peer_id = read_n(stream, 20).await?;
 
         {
-
             // validate info hash
             if &info_hash != &self.info_hash.0 {
                 println!("{}", crate::bencode::hash::to_hex(&info_hash));
@@ -163,8 +157,14 @@ impl PeerConnection {
             };
             // add a request
             let offset = block_index * BLOCK_SIZE;
-            if self.me.requests.add(piece_index, block_index, offset, block_length) {
-                self.writer_sender.send(Message::Request(piece_index, offset, block_length)).await?;
+            if self
+                .me
+                .requests
+                .add(piece_index, block_index, offset, block_length)
+            {
+                self.writer_sender
+                    .send(Message::Request(piece_index, offset, block_length))
+                    .await?;
             };
             req_len = self.me.requests.len();
         }
@@ -180,13 +180,17 @@ impl PeerConnection {
             Some(r) => {
                 let data = {
                     let (sender, receiver) = futures::channel::oneshot::channel();
-                    self.require.send(ManagerEvent::RequireData(r.clone(), sender)).await?;
+                    self.require
+                        .send(ManagerEvent::RequireData(r.clone(), sender))
+                        .await?;
                     receiver.await?
                 };
                 self.upload_in_progress = true;
-                self.writer_sender.send(Message::Piece(r.piece_index, r.offset, data)).await?
+                self.writer_sender
+                    .send(Message::Piece(r.piece_index, r.offset, data))
+                    .await?
             }
-            None => ()
+            None => (),
         };
         Ok(())
     }
@@ -194,14 +198,18 @@ impl PeerConnection {
     async fn queue_blocks(&mut self, piece_index: u32) -> Result<()> {
         let incomplete_blocks = {
             let (sender, receiver) = futures::channel::oneshot::channel();
-            self.require.send(ManagerEvent::RequireIncompleteBlocks(piece_index, sender)).await?;
+            self.require
+                .send(ManagerEvent::RequireIncompleteBlocks(piece_index, sender))
+                .await?;
             receiver.await?
         };
 
         for (block_index, block_length) in incomplete_blocks {
             if !self.me.requests.has(piece_index, block_index) {
-                self.to_request.insert((piece_index, block_index),
-                                       (piece_index, block_index, block_length));
+                self.to_request.insert(
+                    (piece_index, block_index),
+                    (piece_index, block_index, block_length),
+                );
             }
         }
         Ok(())
@@ -224,7 +232,8 @@ impl PeerConnection {
     }
 
     async fn send_bitfield(&mut self) -> Result<()> {
-        let mut bytes: Vec<u8> = vec![0; (self.me.has_pieces.len() as f64 / 8 as f64).ceil() as usize];
+        let mut bytes: Vec<u8> =
+            vec![0; (self.me.has_pieces.len() as f64 / 8 as f64).ceil() as usize];
         // todo:1 block here
         // bytes = vec![0; self.me.lock().await.has_pieces.len()];
         let l = self.me.has_pieces.len();
@@ -235,7 +244,7 @@ impl PeerConnection {
                 let mask = 1 << (7 - index_into_byte);
                 bytes[bytes_index] |= mask;
             }
-        };
+        }
         println!("{:?}: send bitfield", task::current().id());
         self.writer_sender.send(Message::Bitfield(bytes)).await?;
         Ok(())
@@ -253,7 +262,11 @@ fn start_read_loop(stream: TcpStream, ipc_sender: Sender<IPC>) -> Receiver<Void>
     shutdown
 }
 
-fn start_write_loop(stream: TcpStream, ipc_sender: Sender<IPC>, writer_receiver: Receiver<Message>) -> JoinHandle<()> {
+fn start_write_loop(
+    stream: TcpStream,
+    ipc_sender: Sender<IPC>,
+    writer_receiver: Receiver<Message>,
+) -> JoinHandle<()> {
     let write_handle = spawn_and_log_error(async move {
         let e = conn_write_loop(writer_receiver, stream, ipc_sender).await;
         println!("conn_write_loop over!");
@@ -263,14 +276,21 @@ fn start_write_loop(stream: TcpStream, ipc_sender: Sender<IPC>, writer_receiver:
     write_handle
 }
 
-pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String, info_hash: Sha1,
-                            peer: Peer, ipc_sender: Sender<IPC>, ipcs: Receiver<IPC>,
-                            manager_sender: UnboundedSender<ManagerEvent>,
-                            mut require: Sender<ManagerEvent>,
+pub async fn peer_conn_loop(
+    send_handshake_first: bool,
+    our_peer_id: String,
+    info_hash: Sha1,
+    peer: Peer,
+    ipc_sender: Sender<IPC>,
+    ipcs: Receiver<IPC>,
+    manager_sender: UnboundedSender<ManagerEvent>,
+    mut require: Sender<ManagerEvent>,
 ) -> Result<()> {
     let have_pieces = {
         let (sender, receiver) = futures::channel::oneshot::channel();
-        require.send(ManagerEvent::RequireHavePieces(sender)).await?;
+        require
+            .send(ManagerEvent::RequireHavePieces(sender))
+            .await?;
         receiver.await?
     };
     let num_pieces = have_pieces.len();
@@ -327,15 +347,22 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String, inf
             IPC::BlockComplete(piece_index, block_index) => {
                 peer_conn.to_request.remove(&(piece_index, block_index));
                 match peer_conn.me.requests.remove(piece_index, block_index) {
-                    Some(r) =>
-                        peer_conn.writer_sender.send(Message::Cancel(r.piece_index, r.offset, r.block_length)).await?,
+                    Some(r) => {
+                        peer_conn
+                            .writer_sender
+                            .send(Message::Cancel(r.piece_index, r.offset, r.block_length))
+                            .await?
+                    }
                     None => (),
                 }
             }
             IPC::PieceComplete(piece_index) => {
                 peer_conn.me.has_pieces[piece_index as usize] = true;
                 peer_conn.update_my_interested_status().await?;
-                peer_conn.writer_sender.send(Message::Have(piece_index)).await?;
+                peer_conn
+                    .writer_sender
+                    .send(Message::Have(piece_index))
+                    .await?;
             }
             IPC::DownloadComplete => {
                 // peer_conn.halt = true;
@@ -346,7 +373,7 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String, inf
                 peer_conn.upload_next_block().await?;
             }
         }
-    };
+    }
     drop(peer_conn);
     write_handle.await;
     Ok(())
@@ -355,7 +382,11 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String, inf
 #[derive(Debug)]
 enum Void {}
 
-async fn conn_read_loop(mut stream: TcpStream, mut sender: Sender<IPC>, _shutdown: Sender<Void>) -> Result<()> {
+async fn conn_read_loop(
+    mut stream: TcpStream,
+    mut sender: Sender<IPC>,
+    _shutdown: Sender<Void>,
+) -> Result<()> {
     let stream = &mut stream;
     // let message_size = ;
     println!("task {}: conn_read_loop", task::current().id());
@@ -365,9 +396,9 @@ async fn conn_read_loop(mut stream: TcpStream, mut sender: Sender<IPC>, _shutdow
             // println!("{:?}: stream message len: {}", task::current().id(), message_size);
             let message = read_n(stream, message_size).await?;
             Message::new(&message[0], &message[1..])
-            // let m = Message::new(&message[0], &message[1..]);
-            // println!("{:?}", m);
-            // m
+        // let m = Message::new(&message[0], &message[1..]);
+        // println!("{:?}", m);
+        // m
         } else {
             Message::KeepAlive
         };
@@ -378,7 +409,11 @@ async fn conn_read_loop(mut stream: TcpStream, mut sender: Sender<IPC>, _shutdow
     Ok(())
 }
 
-async fn conn_write_loop(messages: Receiver<Message>, mut stream: TcpStream, mut sender: Sender<IPC>) -> Result<()> {
+async fn conn_write_loop(
+    messages: Receiver<Message>,
+    mut stream: TcpStream,
+    mut sender: Sender<IPC>,
+) -> Result<()> {
     // let mut stream = &mut stream;
     let mut messages = messages.fuse();
     println!("task {}: conn_write_loop", task::current().id());
@@ -457,14 +492,24 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
         }
         Message::Request(piece_index, offset, length) => {
             let block_index = offset / BLOCK_SIZE;
-            peer_conn.he.requests.add(piece_index, block_index, offset, length);
+            peer_conn
+                .he
+                .requests
+                .add(piece_index, block_index, offset, length);
             peer_conn.upload_next_block().await?;
         }
         Message::Piece(piece_index, offset, data) => {
             let block_index = offset / BLOCK_SIZE;
             peer_conn.me.requests.remove(piece_index, block_index);
             // println!("Message::Piece start send");
-            peer_conn.manager_sender.send(ManagerEvent::Download(Message::Piece(piece_index, offset, data))).await?;
+            peer_conn
+                .manager_sender
+                .send(ManagerEvent::Download(Message::Piece(
+                    piece_index,
+                    offset,
+                    data,
+                )))
+                .await?;
             // println!("Message::Piece finish send");
             peer_conn.update_my_interested_status().await?;
             peer_conn.request_more_blocks().await?;
@@ -473,7 +518,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
             let block_index = offset / BLOCK_SIZE;
             peer_conn.he.requests.remove(piece_index, block_index);
         }
-        _ => return Err("Error UnknownRequestType(message)")?
+        _ => return Err("Error UnknownRequestType(message)")?,
     }
 
     Ok(())
@@ -519,7 +564,13 @@ impl RequestQueue {
         self.position(piece_index, block_index).is_some()
     }
 
-    pub fn add(&mut self, piece_index: u32, block_index: u32, offset: u32, block_length: u32) -> bool {
+    pub fn add(
+        &mut self,
+        piece_index: u32,
+        block_index: u32,
+        offset: u32,
+        block_length: u32,
+    ) -> bool {
         if !self.has(piece_index, block_index) {
             let r = RequestMetadata {
                 piece_index,
@@ -548,12 +599,14 @@ impl RequestQueue {
                 let r = self.requests.remove(i);
                 Some(r)
             }
-            None => None
+            None => None,
         }
     }
 
     fn position(&self, piece_index: u32, block_index: u32) -> Option<usize> {
-        self.requests.iter().position(|r| r.matches(piece_index, block_index))
+        self.requests
+            .iter()
+            .position(|r| r.matches(piece_index, block_index))
     }
 
     pub fn len(&self) -> usize {

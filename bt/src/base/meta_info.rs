@@ -1,10 +1,10 @@
-use std::time::Instant;
-use std::collections::BTreeMap;
-use crate::bencode::decode::{DecodeTo, Decoder, DecodeError};
+use crate::base::meta_info::Info::{Multi, Single};
+use crate::bencode::decode::{DecodeError, DecodeTo, Decoder};
+use crate::bencode::encode::{EncodeTo, Encoder};
 use crate::bencode::hash::Sha1;
-use crate::bencode::value::{FromValue, Value, IntoValue};
-use crate::base::meta_info::Info::{Single, Multi};
-use crate::bencode::encode::{Encoder, EncodeTo};
+use crate::bencode::value::{FromValue, IntoValue, Value};
+use std::collections::BTreeMap;
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub struct TorrentMetaInfo {
@@ -27,36 +27,36 @@ impl TorrentMetaInfo {
 
     pub fn piece_length(&self) -> usize {
         match &self.info {
-            Single(s) => {s.piece_length},
-            Multi(m) => {m.piece_length},
+            Single(s) => s.piece_length,
+            Multi(m) => m.piece_length,
         }
     }
 
     pub fn num_pieces(&self) -> usize {
         match &self.info {
-            Single(s) => {s.pieces.len()},
-            Multi(m) => {m.pieces.len()},
+            Single(s) => s.pieces.len(),
+            Multi(m) => m.pieces.len(),
         }
     }
 
     pub fn pieces(&self) -> &[Sha1] {
         match &self.info {
-            Single(s) => {&s.pieces},
-            Multi(m) => {&m.pieces},
+            Single(s) => &s.pieces,
+            Multi(m) => &m.pieces,
         }
     }
 
     pub fn length(&self) -> u64 {
         let info = &self.info;
         match info {
-            Single(i) => {i.length},
+            Single(i) => i.length,
             Multi(m) => {
                 let mut len = 0;
                 for item in &m.files {
                     len += item.length;
                 }
                 len
-            },
+            }
         }
     }
 
@@ -73,12 +73,8 @@ impl TorrentMetaInfo {
 
     pub fn announce(&mut self) -> String {
         match &self.announce_list {
-            Some(_v) => {
-                self.announce.clone().unwrap()
-            },
-            None => {
-                self.announce.clone().unwrap()
-            },
+            Some(_v) => self.announce.clone().unwrap(),
+            None => self.announce.clone().unwrap(),
         }
     }
 }
@@ -116,7 +112,6 @@ pub struct FileInfo {
     pub path: Vec<String>,
 }
 
-
 impl DecodeTo for FileInfo {
     fn decode(d: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         d.read_struct(|d| {
@@ -134,23 +129,19 @@ impl DecodeTo for Info {
         d.read_struct(|d| {
             let files_result: Result<Vec<FileInfo>, DecodeError> = d.read_field("files");
             match files_result {
-                Ok(files) => {
-                    Ok(Info::Multi(MultiInfo {
-                        files,
-                        name: d.read_field("name")?,
-                        piece_length: d.read_field("piece length")?,
-                        pieces: d.read_field("pieces")?,
-                    }))
-                },
-                _ => {
-                    Ok(Info::Single(SingleInfo {
-                        length: d.read_field("length")?,
-                        md5sum: d.read_option("md5sum")?,
-                        name: d.read_field("name")?,
-                        piece_length: d.read_field("piece length")?,
-                        pieces: d.read_field("pieces")?,
-                    }))
-                }
+                Ok(files) => Ok(Info::Multi(MultiInfo {
+                    files,
+                    name: d.read_field("name")?,
+                    piece_length: d.read_field("piece length")?,
+                    pieces: d.read_field("pieces")?,
+                })),
+                _ => Ok(Info::Single(SingleInfo {
+                    length: d.read_field("length")?,
+                    md5sum: d.read_option("md5sum")?,
+                    name: d.read_field("name")?,
+                    piece_length: d.read_field("piece length")?,
+                    pieces: d.read_field("pieces")?,
+                })),
             }
         })
     }
@@ -161,7 +152,7 @@ impl DecodeTo for TorrentMetaInfo {
         d.read_struct(|d| {
             Ok(TorrentMetaInfo {
                 announce: d.read_option("announce")?,
-//                    announce_list: d.read_option("announce-list")?,
+                //                    announce_list: d.read_option("announce-list")?,
                 announce_list: d.read_field_combine("announce-list")?,
                 // TODO: time
                 creation_date: None,
@@ -174,7 +165,6 @@ impl DecodeTo for TorrentMetaInfo {
         })
     }
 }
-
 
 impl FromValue for FileInfo {
     fn from_value(value: &Value) -> Result<FileInfo, DecodeError> {
@@ -197,7 +187,6 @@ fn insert_option<T: IntoValue>(map: &mut BTreeMap<String, Value>, s: &str, t: Op
     };
 }
 
-
 impl IntoValue for FileInfo {
     fn into_value(self) -> Value {
         let mut map = BTreeMap::new();
@@ -213,23 +202,19 @@ impl IntoValue for FileInfo {
 impl FromValue for Info {
     fn from_value(value: &Value) -> Result<Self, DecodeError> {
         match value.get_option_value("files")? {
-            None => {
-                Ok(Single(SingleInfo {
-                    length: value.get_field("length")?,
-                    md5sum: value.get_option_field("md5sum")?,
-                    name: value.get_field("name")?,
-                    piece_length: value.get_field("piece length")?,
-                    pieces: value.get_field("pieces")?,
-                }))
-            },
-            Some(_) => {
-                Ok(Multi(MultiInfo {
-                    files: value.get_field("files")?,
-                    name: value.get_field("name")?,
-                    piece_length: value.get_field("piece length")?,
-                    pieces: value.get_field("pieces")?,
-                }))
-            },
+            None => Ok(Single(SingleInfo {
+                length: value.get_field("length")?,
+                md5sum: value.get_option_field("md5sum")?,
+                name: value.get_field("name")?,
+                piece_length: value.get_field("piece length")?,
+                pieces: value.get_field("pieces")?,
+            })),
+            Some(_) => Ok(Multi(MultiInfo {
+                files: value.get_field("files")?,
+                name: value.get_field("name")?,
+                piece_length: value.get_field("piece length")?,
+                pieces: value.get_field("pieces")?,
+            })),
         }
     }
 }
@@ -240,18 +225,18 @@ impl IntoValue for Info {
 
         match self {
             Multi(multi) => {
-                insert(&mut map,"files", multi.files);
-                insert(&mut map,"pieces", multi.pieces);
-                insert(&mut map,"name", multi.name);
-                insert(&mut map,"piece length", multi.piece_length);
-            },
+                insert(&mut map, "files", multi.files);
+                insert(&mut map, "pieces", multi.pieces);
+                insert(&mut map, "name", multi.name);
+                insert(&mut map, "piece length", multi.piece_length);
+            }
             Single(single) => {
-                insert_option(&mut map,"md5sum", single.md5sum);
-                insert(&mut map,"length", single.length);
-                insert(&mut map,"pieces", single.pieces);
-                insert(&mut map,"name", single.name);
-                insert(&mut map,"piece length", single.piece_length);
-            },
+                insert_option(&mut map, "md5sum", single.md5sum);
+                insert(&mut map, "length", single.length);
+                insert(&mut map, "pieces", single.pieces);
+                insert(&mut map, "name", single.name);
+                insert(&mut map, "piece length", single.piece_length);
+            }
         };
         Value::Dict(map)
     }
@@ -280,7 +265,7 @@ impl IntoValue for TorrentMetaInfo {
         insert_option(&mut map, "comment", self.comment);
         insert_option(&mut map, "created by", self.created_by);
         // Todo: instant
-//        insert_option(&mut map, "creation date", None);
+        //        insert_option(&mut map, "creation date", None);
         insert_option(&mut map, "encoding", self.encoding);
         insert(&mut map, "info", self.info);
 
@@ -290,13 +275,13 @@ impl IntoValue for TorrentMetaInfo {
 
 #[cfg(test)]
 mod tests {
+    use crate::base::meta_info::{Info, TorrentMetaInfo};
+    use crate::bencode::decode::{DecodeError, DecodeTo, Decoder};
+    use crate::bencode::value::{FromValue, IntoValue, Value};
+    use bencode::util::ByteString;
     use std::fs;
     use std::fs::File;
     use std::io::Read;
-    use bencode::util::ByteString;
-    use crate::bencode::decode::{Decoder, DecodeTo, DecodeError};
-    use crate::base::meta_info::{TorrentMetaInfo, Info};
-    use crate::bencode::value::{Value, FromValue, IntoValue};
 
     #[test]
     fn it_works() {
@@ -306,13 +291,13 @@ mod tests {
     #[test]
     fn decode() {
         let f = fs::read(
-            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
-        ).unwrap();
+            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
+        )
+        .unwrap();
 
-//        let f = fs::read(
-//            r#"D:\MyVideo\电影\里\3_xunlei\[脸肿字幕组][魔人]euphoria 目指す楽園は神聖なる儀式の先に。救世主の母は……白夜凛音！？ 編\.0D787B3AF81663F1CF1FC1EDF397DFE6F012829A.torrent"#
-//        ).unwrap();
-
+        //        let f = fs::read(
+        //            r#"D:\MyVideo\电影\里\3_xunlei\[脸肿字幕组][魔人]euphoria 目指す楽園は神聖なる儀式の先に。救世主の母は……白夜凛音！？ 編\.0D787B3AF81663F1CF1FC1EDF397DFE6F012829A.torrent"#
+        //        ).unwrap();
 
         let mut decoder = Decoder::new(f.as_slice());
 
@@ -327,22 +312,23 @@ mod tests {
     #[test]
     fn torrent_meta_info() {
         let f = fs::read(
-            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
-        ).unwrap();
+            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
+        )
+        .unwrap();
 
         let mut decoder = Decoder::new(f.as_slice());
 
         let torrent_meta_info = TorrentMetaInfo::decode(&mut decoder).unwrap();
 
-        if let Info::Multi(multi_info) =  torrent_meta_info.info {
-
-            println!("piece length: {}", multi_info.piece_length/1024/1024)
+        if let Info::Multi(multi_info) = torrent_meta_info.info {
+            println!("piece length: {}", multi_info.piece_length / 1024 / 1024)
         }
     }
 
     #[test]
     fn bencode() {
-        let filename = r#"D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"#;
+        let filename =
+            r#"D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"#;
         println!("Loading {}", filename);
 
         // read the torrent file into a byte vector
@@ -358,15 +344,15 @@ mod tests {
             let s = map.get(&key).unwrap();
             println!("{}", String::from_utf8(s.to_bytes().unwrap()).unwrap())
         }
-//        let result = FromBencode::from_bencode(&bencode).unwrap();
-
+        //        let result = FromBencode::from_bencode(&bencode).unwrap();
     }
 
     #[test]
     fn from_value() {
         let f = fs::read(
-            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
-        ).unwrap();
+            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
+        )
+        .unwrap();
         let mut decoder = Decoder::new(f.as_slice());
 
         let v = Value::decode(&mut decoder).unwrap();
@@ -382,8 +368,9 @@ mod tests {
     #[test]
     fn into_value() {
         let f = fs::read(
-            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
-        ).unwrap();
+            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
+        )
+        .unwrap();
         let mut decoder = Decoder::new(f.as_slice());
 
         let v = Value::decode(&mut decoder).unwrap();
@@ -398,8 +385,9 @@ mod tests {
     #[test]
     fn pieces_files() {
         let f = fs::read(
-            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
-        ).unwrap();
+            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
+        )
+        .unwrap();
         let mut decoder = Decoder::new(f.as_slice());
 
         let v = Value::decode(&mut decoder).unwrap();
@@ -410,13 +398,17 @@ mod tests {
             let piece_num = m.pieces.len();
             let piece_len = m.piece_length;
 
-            let per_file_piece_sum = m.files.iter().map(|f| {
-                (f.length as f64 / piece_len as f64).ceil() as usize
-            }).sum::<usize>();
+            let per_file_piece_sum = m
+                .files
+                .iter()
+                .map(|f| (f.length as f64 / piece_len as f64).ceil() as usize)
+                .sum::<usize>();
 
-            let files_piece_sum = m.files.iter().map(|f| {
-                (f.length as usize / piece_len) + 1
-            }).sum::<usize>();
+            let files_piece_sum = m
+                .files
+                .iter()
+                .map(|f| (f.length as usize / piece_len) + 1)
+                .sum::<usize>();
 
             println!("{}, {}, {}", per_file_piece_sum, files_piece_sum, piece_num)
         }

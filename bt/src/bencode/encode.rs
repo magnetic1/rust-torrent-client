@@ -1,8 +1,8 @@
-use std::io::Write;
-use crate::bencode::Integer;
-use std::fmt::Debug;
-use std::collections::BTreeMap;
 use crate::bencode::value::Value;
+use crate::bencode::Integer;
+use std::collections::BTreeMap;
+use std::fmt::Debug;
+use std::io::Write;
 
 /// Encodes values into a stream of bytes.
 #[derive(Clone)]
@@ -68,10 +68,12 @@ impl Encoder {
 
     /// Writes a key value mapping to the stream.
     pub fn write_dict<K, V>(&mut self, map: &BTreeMap<K, V>) -> Result<(), EncodeError>
-        where K: Ord + AsRef<str>, V: EncodeTo
+    where
+        K: Ord + AsRef<str>,
+        V: EncodeTo,
     {
         self.write_byte(b'd')?;
-        for (k, v) in map.iter(){
+        for (k, v) in map.iter() {
             self.write_str(k.as_ref())?;
             v.encode(self)?;
         }
@@ -103,16 +105,17 @@ impl EncodeTo for Value {
 
 #[cfg(test)]
 mod test {
-    use std::fs;
-    use crate::bencode::decode::{Decoder, DecodeTo};
-    use crate::bencode::value::Value;
+    use crate::bencode::decode::{DecodeTo, Decoder};
     use crate::bencode::encode::{EncodeTo, Encoder};
+    use crate::bencode::value::Value;
+    use std::fs;
 
     #[test]
     fn encode_test() {
         let f = fs::read(
-            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
-        ).unwrap();
+            "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
+        )
+        .unwrap();
         let mut decoder = Decoder::new(f.as_slice());
 
         let mut encoder = Encoder::new();
@@ -124,6 +127,5 @@ mod test {
         };
         value.encode(&mut encoder).unwrap();
         println!("{}", String::from_utf8(encoder.into_bytes()).unwrap())
-
     }
 }

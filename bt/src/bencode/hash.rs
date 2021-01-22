@@ -1,8 +1,8 @@
-use std::ops::Deref;
-use std::ptr;
-use std::fmt::{Debug, Formatter, Error};
 use core::fmt;
 use crypto::digest::Digest;
+use std::fmt::{Debug, Error, Formatter};
+use std::ops::Deref;
+use std::ptr;
 
 #[derive(Eq, PartialEq, Clone)]
 pub struct Sha1(pub [u8; 20]);
@@ -33,7 +33,6 @@ impl Sha1 {
         unsafe { String::from_utf8_unchecked(buf.to_vec()) }
     }
 
-
     pub fn to_sha1list(bytes: &[u8]) -> Vec<Sha1> {
         let len = 20;
         let mut i = 20;
@@ -42,8 +41,7 @@ impl Sha1 {
         while i <= bytes.len() {
             let mut t = [0; 20];
             unsafe {
-                ptr::copy_nonoverlapping(
-                    bytes.as_ptr().add( i - len), t.as_mut_ptr(), len);
+                ptr::copy_nonoverlapping(bytes.as_ptr().add(i - len), t.as_mut_ptr(), len);
             }
 
             let sha1 = Sha1(t);
@@ -96,17 +94,17 @@ fn hash_test() {
     assert_eq!(sha1_vec, vec![hash.clone(); 3]);
 
     println!("{:#}", hash)
-//
-//    let mut vec = vec![1, 2, 3];
-//    let s = (0..j).chain(1..3).all();
-//    let t= unsafe { vec.as_mut_ptr().add(1).read() };
+    //
+    //    let mut vec = vec![1, 2, 3];
+    //    let s = (0..j).chain(1..3).all();
+    //    let t= unsafe { vec.as_mut_ptr().add(1).read() };
 }
 
 #[test]
 fn list_test() {
-//    let mut list = [["123", "123", "123"]];
-//    let res :&[&str] = list.iter().flat_map(|elem| {*elem}).collect();
-//    println!("{:?}", res);
+    //    let mut list = [["123", "123", "123"]];
+    //    let res :&[&str] = list.iter().flat_map(|elem| {*elem}).collect();
+    //    println!("{:?}", res);
 
     let mut list = ["1", "2", "3"];
     swap_to_head(&mut list, 0);
@@ -116,13 +114,11 @@ fn list_test() {
     assert_eq!(list, ["2", "1", "3"]);
 
     swap_to_head(&mut list, 2);
-    assert_eq!(list, ["3", "2", "1", ]);
+    assert_eq!(list, ["3", "2", "1",]);
 }
-
 
 pub fn swap_to_head<T>(list: &mut [T], n: usize) {
     for i in 0..n {
         list.swap(n - i, n - i - 1);
     }
 }
-
