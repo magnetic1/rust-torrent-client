@@ -291,8 +291,7 @@ mod tests {
     fn decode() {
         let f = fs::read(
             "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
-        )
-        .unwrap();
+        ).unwrap();
 
         //        let f = fs::read(
         //            r#"D:\MyVideo\电影\里\3_xunlei\[脸肿字幕组][魔人]euphoria 目指す楽園は神聖なる儀式の先に。救世主の母は……白夜凛音！？ 編\.0D787B3AF81663F1CF1FC1EDF397DFE6F012829A.torrent"#
@@ -312,8 +311,7 @@ mod tests {
     fn torrent_meta_info() {
         let f = fs::read(
             "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
-        )
-        .unwrap();
+        ).unwrap();
 
         let mut decoder = Decoder::new(f.as_slice());
 
@@ -328,8 +326,7 @@ mod tests {
     fn from_value() {
         let f = fs::read(
             "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
-        )
-        .unwrap();
+        ).unwrap();
         let mut decoder = Decoder::new(f.as_slice());
 
         let v = Value::decode(&mut decoder).unwrap();
@@ -346,8 +343,7 @@ mod tests {
     fn into_value() {
         let f = fs::read(
             "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
-        )
-        .unwrap();
+        ).unwrap();
         let mut decoder = Decoder::new(f.as_slice());
 
         let v = Value::decode(&mut decoder).unwrap();
@@ -363,8 +359,7 @@ mod tests {
     fn pieces_files() {
         let f = fs::read(
             "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
-        )
-        .unwrap();
+        ).unwrap();
         let mut decoder = Decoder::new(f.as_slice());
 
         let v = Value::decode(&mut decoder).unwrap();
