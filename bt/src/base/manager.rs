@@ -11,7 +11,7 @@ use async_std::{
     sync::{Arc, Mutex},
 };
 use futures::channel::mpsc::UnboundedSender;
-use futures::{channel::mpsc, channel::mpsc::Sender, select, FutureExt, SinkExt, StreamExt};
+use futures::{channel::mpsc, channel::mpsc::Sender, select, SinkExt, StreamExt};
 use std::collections::{HashMap, VecDeque};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;

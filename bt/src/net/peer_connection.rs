@@ -391,7 +391,8 @@ async fn conn_read_loop(
     // let message_size = ;
     println!("task {}: conn_read_loop", task::current().id());
     // let mut buf = vec![0; 4];
-    while let message_size = bytes_to_u32(&read_n(stream, 4).await?) {
+    loop {
+        let message_size = bytes_to_u32(&read_n(stream, 4).await?);
         let message = if message_size > 0 {
             // println!("{:?}: stream message len: {}", task::current().id(), message_size);
             let message = read_n(stream, message_size).await?;
@@ -405,8 +406,6 @@ async fn conn_read_loop(
 
         sender.send(IPC::Message(message)).await?;
     }
-
-    Ok(())
 }
 
 async fn conn_write_loop(

@@ -2,30 +2,20 @@ use crate::{
     base::{
         ipc::{Message, IPC},
         manager::ManagerEvent,
-        meta_info::{Info, TorrentMetaInfo},
+        meta_info::TorrentMetaInfo,
         Result,
     },
     bencode::hash::Sha1,
     net::peer_connection::RequestMetadata,
-    require_oneshot,
 };
 use async_std::{
-    fs::{File, OpenOptions},
+    fs::File,
     io,
     io::prelude::*,
-    path::Path,
-    prelude::*,
-    sync::{Arc, Mutex, MutexGuard},
-    task,
+    sync::{Arc, Mutex},
 };
 use futures::channel::mpsc::UnboundedSender;
-use futures::{
-    channel::mpsc,
-    channel::mpsc::{Receiver, Sender},
-    prelude::stream::FuturesUnordered,
-    sink::SinkExt,
-    StreamExt,
-};
+use futures::{channel::mpsc::Receiver, sink::SinkExt, StreamExt};
 
 pub const BLOCK_SIZE: u32 = 16 * 1024;
 
