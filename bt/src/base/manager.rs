@@ -1,7 +1,6 @@
 use async_std::{
     sync::{Arc, Mutex},
     fs::{File, OpenOptions},
-    stream,
 };
 use futures::{
     select,
@@ -9,7 +8,7 @@ use futures::{
     StreamExt,
     SinkExt,
     channel::mpsc,
-    channel::mpsc::{Receiver, Sender},
+    channel::mpsc::{Sender},
 };
 use crate::{
     net::peer_connection::{RequestMetadata, Peer, peer_conn_loop},
@@ -35,7 +34,7 @@ pub struct Manager {
 
 fn connect(send_handshake_first: bool, peer: Peer, peers: &mut HashMap<Peer, Sender<IPC>>,
                  our_peer_id: String, manager: &mut Manager, mut disconnect_sender: Sender<Peer>,
-                 mut sender_unbounded: UnboundedSender<ManagerEvent>,
+                 sender_unbounded: UnboundedSender<ManagerEvent>,
                  sender_to_download: Sender<ManagerEvent>) {
     let (peer_sender, peer_receiver) = mpsc::channel(10);
     let params = (send_handshake_first, our_peer_id,
@@ -56,8 +55,8 @@ fn connect(send_handshake_first: bool, peer: Peer, peers: &mut HashMap<Peer, Sen
 }
 
 pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
-    let (mut sender_to_download, mut download_receiver) = mpsc::channel(10);
-    let (mut sender_unbounded, mut events_unbounded) = mpsc::unbounded();
+    let (mut sender_to_download, download_receiver) = mpsc::channel(10);
+    let (sender_unbounded, mut events_unbounded) = mpsc::unbounded();
     // let (mut sender_unbounded, mut events_unbounded) = mpsc::unbounded();
     let mut peers: HashMap<Peer, Sender<IPC>> = HashMap::new();
     let mut peers_deque: VecDeque<(bool, Peer)> = VecDeque::new();
@@ -210,7 +209,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                 // }
             }
 
-            ManagerEvent::RequirePieceLength(mut sender) => {
+            ManagerEvent::RequirePieceLength(sender) => {
                 sender.send(manager.meta_info.piece_length()).unwrap();
             }
             ManagerEvent::FileFinish(file_index) => {

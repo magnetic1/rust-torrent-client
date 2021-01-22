@@ -1,10 +1,8 @@
-use std::collections::BTreeMap;
-use core::fmt;
-use std::fmt::{Formatter, Error};
+use crate::bencode::decode::{DecodeError, DecodeTo, Decoder};
 use crate::bencode::hash::Sha1;
-use crate::bencode::decode::{DecodeTo, Decoder, DecodeError};
-use std::fs;
-use crate::base::meta_info::{TorrentMetaInfo, Info};
+use core::fmt;
+use std::collections::BTreeMap;
+use std::fmt::{Error, Formatter};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Value {
@@ -24,7 +22,9 @@ impl Value {
     pub fn get_value(&self, key: &str) -> Result<&Value, DecodeError> {
         match self {
             Value::Dict(map) => {
-                return map.get(key).ok_or(DecodeError::MissingField(key.to_string()));
+                return map
+                    .get(key)
+                    .ok_or(DecodeError::MissingField(key.to_string()));
             }
             _ => Err(DecodeError::InvalidDict),
         }
@@ -42,10 +42,11 @@ impl Value {
     pub fn get_field<T: FromValue>(&self, key: &str) -> Result<T, DecodeError> {
         match self {
             Value::Dict(map) => {
-                return match map.get(key).ok_or(DecodeError::MissingField(key.to_string())) {
-                    Ok(v) => {
-                        T::from_value(v)
-                    }
+                return match map
+                    .get(key)
+                    .ok_or(DecodeError::MissingField(key.to_string()))
+                {
+                    Ok(v) => T::from_value(v),
                     Err(e) => Err(e),
                 };
             }
@@ -57,7 +58,7 @@ impl Value {
         match self {
             Value::Dict(map) => {
                 return match map.get(key) {
-                    Some(v) => T::from_value(v).and_then(|s| { Ok(Some(s)) }),
+                    Some(v) => T::from_value(v).and_then(|s| Ok(Some(s))),
                     None => Ok(None),
                 };
             }
@@ -68,30 +69,26 @@ impl Value {
 
 // TODO: pretty format
 impl fmt::Display for Value {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
         match self {
             Value::Bytes(s) => {
-//                let s = hex::encode(s);
+                //                let s = hex::encode(s);
                 let sha1_list = Sha1::to_sha1list(s);
-//                println!("{}", s);
+                //                println!("{}", s);
                 write!(f, "(\n")?;
                 for sha1 in sha1_list {
                     write!(f, "{}\n", sha1.to_hex())?;
                 }
                 write!(f, ")\n")
             }
-            Value::Integer(i) => {
-                write!(f, "{}", i)
-            }
-            Value::String(s) => {
-                write!(f, "{}", s)
-            }
+            Value::Integer(i) => write!(f, "{}", i),
+            Value::String(s) => write!(f, "{}", s),
             Value::List(list) => {
                 write!(f, "List(\n")?;
                 for item in list {
                     write!(f, "\t\t{}\n", item)?;
                 }
-//                f.pad("\t");
+                //                f.pad("\t");
                 write!(f, "\t)\n")
             }
             Value::Dict(map) => {
@@ -106,7 +103,7 @@ impl fmt::Display for Value {
 }
 
 impl DecodeTo for Value {
-    fn decode(d: &mut Decoder) -> Result<Value, DecodeError> {
+    fn decode(d: &mut Decoder<'_>) -> Result<Value, DecodeError> {
         match d.peek_byte()? {
             b'd' => Ok(Value::Dict(d.read_dict()?)),
             b'l' => Ok(Value::List(d.read_list()?)),
@@ -118,7 +115,7 @@ impl DecodeTo for Value {
                     Ok(Value::Bytes(bytes))
                 }
             },
-            b => Err(DecodeError::InvalidByte(b))
+            b => Err(DecodeError::InvalidByte(b)),
         }
     }
 }
@@ -130,7 +127,9 @@ pub trait FromValue: Sized {
 impl FromValue for String {
     fn from_value(value: &Value) -> Result<String, DecodeError> {
         if let Value::Bytes(bytes) = value {
-            return String::from_utf8(bytes.clone()).ok().ok_or(DecodeError::InvalidUtf8);
+            return String::from_utf8(bytes.clone())
+                .ok()
+                .ok_or(DecodeError::InvalidUtf8);
         };
         if let Value::String(s) = value {
             return Ok(s.to_string());
@@ -204,10 +203,7 @@ impl IntoValue for Vec<Sha1> {
 
 impl<T: IntoValue> IntoValue for Vec<T> {
     fn into_value(self) -> Value {
-        let res = self.into_iter()
-            .map(|item| {
-                item.into_value()
-            }).collect();
+        let res = self.into_iter().map(|item| item.into_value()).collect();
 
         Value::List(res)
     }
@@ -227,47 +223,56 @@ macro_rules! impl_into_value_integer {
 
 impl_into_value_integer! { u8 u16 u32 u64 usize i8 i16 i32 i64 isize }
 
+#[cfg(test)]
+mod test {
+    use crate::base::meta_info::{Info, TorrentMetaInfo};
+    use crate::bencode::decode::{DecodeError, DecodeTo, Decoder};
+    use crate::bencode::value::{FromValue, IntoValue, Value};
 
-#[test]
-fn from_value() {
-    let v = Value::Integer(4194304i64);
-    let f: usize = FromValue::from_value(&v).unwrap();
-    println!("{}", f);
+    #[test]
+    fn from_value() {
+        let v = Value::Integer(4194304i64);
+        let f: usize = FromValue::from_value(&v).unwrap();
+        println!("{}", f);
 
-    let bytes = vec![b'5', b'1'];
-    let v = Value::Bytes(bytes);
-    let f: String = FromValue::from_value(&v).unwrap();
-    println!("{}", f);
+        let bytes = vec![b'5', b'1'];
+        let v = Value::Bytes(bytes);
+        let f: String = FromValue::from_value(&v).unwrap();
+        println!("{}", f);
 
-    let values = vec![Value::Integer(1), Value::Integer(2)];
-    let v = Value::List(values);
-    let f: Vec<u8> = FromValue::from_value(&v).unwrap();
-    println!("{}", f[1]);
-}
+        let values = vec![Value::Integer(1), Value::Integer(2)];
+        let v = Value::List(values);
+        let f: Vec<u8> = FromValue::from_value(&v).unwrap();
+        println!("{}", f[1]);
+    }
 
-#[test]
-fn into_value() {
-    let f = fs::read(
-        // "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
-        // r#"C:\Users\12287\Downloads\[桜都字幕组][碧蓝航线_Azur Lane][01-12 END][GB][1080P].torrent"#
-        r#"C:\Users\wzq\Downloads\[K&W][Gundam Build Divers Re-RISE][PV-Just before resumed!-][BIG5][720P][x264_AAC].mp4.torrent"#
-    ).unwrap();
+    #[test]
+    fn into_value() {
+        let f = std::fs::read(
+            // "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
+            // r#"C:\Users\12287\Downloads\[桜都字幕组][碧蓝航线_Azur Lane][01-12 END][GB][1080P].torrent"#
+            r#"C:\Users\wzq\Downloads\[K&W][Gundam Build Divers Re-RISE][PV-Just before resumed!-][BIG5][720P][x264_AAC].mp4.torrent"#
+        ).unwrap();
 
-    let mut decoder = Decoder::new(f.as_slice());
+        let mut decoder = Decoder::new(f.as_slice());
 
-    let v = Value::decode(&mut decoder).unwrap();
+        let v = Value::decode(&mut decoder).unwrap();
 
-    let s: Result<TorrentMetaInfo, DecodeError> = FromValue::from_value(&v);
+        let s: Result<TorrentMetaInfo, DecodeError> = FromValue::from_value(&v);
 
-    match s {
-        Ok(meta_info) => {
-            println!("{:#?}", meta_info);
-            if let Info::Multi(multi_info) = meta_info.info {
-                let v = multi_info.pieces.into_value();
-                // println!("{}", v);
-                println!("{}", (multi_info.files[0].length / multi_info.piece_length as u64));
-            };
-        }
-        Err(e) => println!("error: {}", e),
-    };
+        match s {
+            Ok(meta_info) => {
+                println!("{:#?}", meta_info);
+                if let Info::Multi(multi_info) = meta_info.info {
+                    let v = multi_info.pieces.into_value();
+                    // println!("{}", v);
+                    println!(
+                        "{}",
+                        (multi_info.files[0].length / multi_info.piece_length as u64)
+                    );
+                };
+            }
+            Err(e) => println!("error: {}", e),
+        };
+    }
 }

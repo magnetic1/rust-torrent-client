@@ -1,6 +1,5 @@
 use async_std::{
     task,
-    sync::Arc,
     prelude::*,
     net::TcpStream,
     net::Ipv4Addr,
@@ -8,7 +7,6 @@ use async_std::{
 use crate::{
     base::{
         ipc::{Message, IPC, bytes_to_u32},
-        meta_info::TorrentMetaInfo,
         spawn_and_log_error,
         download::BLOCK_SIZE,
         manager::ManagerEvent,
@@ -28,8 +26,8 @@ use futures::{
     channel::mpsc::{self, Sender, Receiver},
 };
 use rand::Rng;
-use std::collections::{HashMap, BTreeMap};
-use futures::io::Error;
+use std::collections::{HashMap};
+
 use futures::channel::mpsc::UnboundedSender;
 use async_std::task::JoinHandle;
 
@@ -101,7 +99,7 @@ impl PeerConnection {
             message.extend(self.our_peer_id.bytes());
             message
         };
-        let mut stream = &mut self.stream;
+        let stream = &mut self.stream;
         // stream.write_all(&[1,2]).await?;
         // let stream = &*self.stream;
         stream.write_all(message.as_slice()).await?;
@@ -244,7 +242,7 @@ impl PeerConnection {
     }
 }
 
-fn start_read_loop(mut stream: TcpStream, mut ipc_sender: Sender<IPC>) -> Receiver<Void> {
+fn start_read_loop(stream: TcpStream, ipc_sender: Sender<IPC>) -> Receiver<Void> {
     let (shutdown_sender, shutdown) = mpsc::channel(1);
     spawn_and_log_error(async move {
         let res = conn_read_loop(stream, ipc_sender, shutdown_sender).await;
@@ -255,7 +253,7 @@ fn start_read_loop(mut stream: TcpStream, mut ipc_sender: Sender<IPC>) -> Receiv
     shutdown
 }
 
-fn start_write_loop(mut stream: TcpStream, mut ipc_sender: Sender<IPC>, mut writer_receiver: Receiver<Message>) -> JoinHandle<()> {
+fn start_write_loop(stream: TcpStream, ipc_sender: Sender<IPC>, writer_receiver: Receiver<Message>) -> JoinHandle<()> {
     let write_handle = spawn_and_log_error(async move {
         let e = conn_write_loop(writer_receiver, stream, ipc_sender).await;
         println!("conn_write_loop over!");
@@ -266,8 +264,8 @@ fn start_write_loop(mut stream: TcpStream, mut ipc_sender: Sender<IPC>, mut writ
 }
 
 pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String, info_hash: Sha1,
-                            peer: Peer, mut ipc_sender: Sender<IPC>, mut ipcs: Receiver<IPC>,
-                            mut manager_sender: UnboundedSender<ManagerEvent>,
+                            peer: Peer, ipc_sender: Sender<IPC>, ipcs: Receiver<IPC>,
+                            manager_sender: UnboundedSender<ManagerEvent>,
                             mut require: Sender<ManagerEvent>,
 ) -> Result<()> {
     let have_pieces = {
@@ -282,7 +280,7 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String, inf
         TcpStream::connect((ip, peer.port)).await?
     };
 
-    let (mut writer_sender, mut writer_receiver) = mpsc::channel(10);
+    let (writer_sender, writer_receiver) = mpsc::channel(10);
 
     let mut peer_conn = PeerConnection {
         halt: false,
@@ -311,7 +309,7 @@ pub async fn peer_conn_loop(send_handshake_first: bool, our_peer_id: String, inf
     while !peer_conn.halt {
         let ipc = select! {
             void = shutdown.next().fuse() => match void {
-                Some(void) => panic!("never reached!"),
+                Some(_void) => panic!("never reached!"),
                 None => break,
             },
             ipc = ipcs.next().fuse() => match ipc {
@@ -380,7 +378,7 @@ async fn conn_read_loop(mut stream: TcpStream, mut sender: Sender<IPC>, _shutdow
     Ok(())
 }
 
-async fn conn_write_loop(mut messages: Receiver<Message>, mut stream: TcpStream, mut sender: Sender<IPC>) -> Result<()> {
+async fn conn_write_loop(messages: Receiver<Message>, mut stream: TcpStream, mut sender: Sender<IPC>) -> Result<()> {
     // let mut stream = &mut stream;
     let mut messages = messages.fuse();
     println!("task {}: conn_write_loop", task::current().id());

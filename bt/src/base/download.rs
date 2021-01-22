@@ -26,7 +26,7 @@ use futures::{
     sink::SinkExt,
     StreamExt,
 };
-use std::fs;
+
 
 pub const BLOCK_SIZE: u32 = 16 * 1024;
 
@@ -243,7 +243,7 @@ impl Download {
 
 pub async fn download_loop(
     mut rx: Receiver<ManagerEvent>,
-    mut manager_sender: UnboundedSender<ManagerEvent>,
+    manager_sender: UnboundedSender<ManagerEvent>,
     files: Arc<Vec<Arc<Mutex<File>>>>,
     file_offsets: Vec<u64>,
     our_peer_id: String,
@@ -480,7 +480,7 @@ pub mod download_inline {
                 }
             }
 
-            let mut file = OpenOptions::new()
+            let file = OpenOptions::new()
                 .create(true)
                 .read(true)
                 .write(true)
@@ -517,7 +517,7 @@ pub mod download_inline {
                 assert!(piece_length >= (files_length - offset) as usize);
                 (files_length - offset) as usize
             };
-            let mut piece = Piece::new(length as u32, offset, shas[i as usize].clone());
+            let piece = Piece::new(length as u32, offset, shas[i as usize].clone());
 
             // piece.verify(&files, &file_offsets)?;
             pieces.push(piece);

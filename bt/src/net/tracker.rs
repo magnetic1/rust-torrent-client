@@ -21,8 +21,8 @@ use std::time::Duration;
 use futures::channel::mpsc::UnboundedSender;
 use crate::base::manager::ManagerEvent;
 use futures::SinkExt;
-use std::sync::Arc;
-use async_std::sync::Mutex;
+
+
 
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -116,7 +116,7 @@ impl TrackerSupervisor {
 
         let mut handles = Vec::new();
         for tier in announce_list {
-            for (i, announce) in tier.iter().enumerate() {
+            for (_i, announce) in tier.iter().enumerate() {
                 let mut sender = self.sender.clone();
                 let announce = announce.to_owned();
                 let peer_id = peer_id.to_owned();
@@ -220,7 +220,7 @@ fn knuth_shuffle<T>(list: &mut [T]) {
 }
 
 pub async fn get_peer(t: &TorrentMetaInfo) {
-    let announces = match t.announce_list {
+    let _announces = match t.announce_list {
         Some(ref v) => {
             v[0].iter().map(|s| s.clone()).collect::<Vec<String>>()
         }
@@ -230,7 +230,7 @@ pub async fn get_peer(t: &TorrentMetaInfo) {
         }
     };
     let v = vec![1, 2, 3, 4];
-    let mut out: Vec<usize> = v
+    let _out: Vec<usize> = v
         .into_par_stream()
         .map(|n| async move { n * n })
         .collect()
@@ -348,7 +348,7 @@ async fn get_tracker_response(peer_id: &str, announce: &str, length: u64,
     let http_res = client.request(request).await?;
 
     let buf = hyper::body::to_bytes(http_res).await?;
-    let mut body = buf.bytes();
+    let body = buf.bytes();
     println!("{}", body.len());
 
     let res = TrackerResponse::parse(body)?;

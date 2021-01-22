@@ -6,7 +6,7 @@ use bt::{
 };
 use rand::Rng;
 use async_std::task;
-use bt::net::tracker::get_peer;
+
 
 pub const PEER_ID_PREFIX: &'static str = "-RC0001-";
 

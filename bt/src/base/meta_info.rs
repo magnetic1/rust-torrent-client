@@ -73,7 +73,7 @@ impl TorrentMetaInfo {
 
     pub fn announce(&mut self) -> String {
         match &self.announce_list {
-            Some(v) => {
+            Some(_v) => {
                 self.announce.clone().unwrap()
             },
             None => {
@@ -118,7 +118,7 @@ pub struct FileInfo {
 
 
 impl DecodeTo for FileInfo {
-    fn decode(d: &mut Decoder) -> Result<Self, DecodeError> {
+    fn decode(d: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         d.read_struct(|d| {
             Ok(FileInfo {
                 length: d.read_field("length")?,
@@ -130,7 +130,7 @@ impl DecodeTo for FileInfo {
 }
 
 impl DecodeTo for Info {
-    fn decode(d: &mut Decoder) -> Result<Self, DecodeError> {
+    fn decode(d: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         d.read_struct(|d| {
             let files_result: Result<Vec<FileInfo>, DecodeError> = d.read_field("files");
             match files_result {
@@ -157,7 +157,7 @@ impl DecodeTo for Info {
 }
 
 impl DecodeTo for TorrentMetaInfo {
-    fn decode(d: &mut Decoder) -> Result<Self, DecodeError> {
+    fn decode(d: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         d.read_struct(|d| {
             Ok(TorrentMetaInfo {
                 announce: d.read_option("announce")?,

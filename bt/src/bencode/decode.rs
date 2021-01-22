@@ -4,7 +4,7 @@ use core::fmt;
 use std::collections::BTreeMap;
 use crate::bencode::hash::Sha1;
 use crate::bencode::Integer;
-use std::error::Error;
+
 
 pub struct Decoder<'a> {
     data: Cursor<&'a [u8]>,
@@ -52,7 +52,7 @@ pub enum DecodeError {
 impl std::error::Error for DecodeError {}
 
 impl fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DecodeError::Eof => f.write_str("unexpected end-of-file"),
             DecodeError::ExtraneousData => f.write_str("extraneous data"),
@@ -68,7 +68,7 @@ impl fmt::Display for DecodeError {
 }
 
 impl<'a> Decoder<'a> {
-    pub fn new(data: &[u8]) -> Decoder {
+    pub fn new(data: &[u8]) -> Decoder<'_> {
         Decoder { data: Cursor::new(data) }
     }
 
@@ -395,7 +395,7 @@ impl<'a> Decoder<'a> {
 }
 
 pub trait DecodeTo: Sized {
-    fn decode(d: &mut Decoder) -> Result<Self, DecodeError>;
+    fn decode(d: &mut Decoder<'_>) -> Result<Self, DecodeError>;
 }
 
 /// Returns whether the given byte may appear in a number.
@@ -407,19 +407,19 @@ fn is_number(b: u8) -> bool {
 }
 
 impl DecodeTo for String {
-    fn decode(d: &mut Decoder) -> Result<Self, DecodeError> {
+    fn decode(d: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         d.read_str()
     }
 }
 
 impl<T: DecodeTo> DecodeTo for Vec<T> {
-    fn decode(d: &mut Decoder) -> Result<Self, DecodeError> {
+    fn decode(d: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         d.read_list()
     }
 }
 
 impl DecodeTo for Vec<Sha1> {
-    fn decode(d: &mut Decoder) -> Result<Self, DecodeError> {
+    fn decode(d: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         let bytes = d.read_byte_string()?;
         Ok(Sha1::to_sha1list(&bytes))
     }
@@ -429,7 +429,7 @@ macro_rules! impl_decodable_integer {
     ( $( $ty:ident )* ) => {
         $(
             impl DecodeTo for $ty {
-                fn decode(d: &mut Decoder) -> Result<$ty, DecodeError> {
+                fn decode(d: &mut Decoder<'_>) -> Result<$ty, DecodeError> {
                     d.read_integer()
                 }
             }
