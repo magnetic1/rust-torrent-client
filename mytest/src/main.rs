@@ -2,7 +2,7 @@ use crossterm::style::Print;
 use crossterm::{
     cursor,
     style::{self, Colorize},
-    terminal, Command, ExecutableCommand, Result,
+    terminal, ExecutableCommand, Result,
 };
 use std::io::{stdout, Stdout};
 use std::thread;
@@ -43,7 +43,7 @@ fn main() -> Result<()> {
 
     let mut printer = Printer::new(stdout);
 
-    printer.print_log("------start------");
+    printer.print_log("------start------")?;
 
     thread::sleep(Duration::from_millis(1500));
     printer.fresh_state(State::Magenta("1█".to_string()))?;
