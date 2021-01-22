@@ -24,5 +24,6 @@ fn main() {
     let peer_id = format!("{}{}", PEER_ID_PREFIX, rand_chars);
 
     println!("start manager_loop");
+
     task::block_on(async { manager_loop(peer_id, metainfo).await }).unwrap();
 }
