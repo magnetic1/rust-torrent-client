@@ -264,7 +264,7 @@ mod test {
             Ok(meta_info) => {
                 println!("{:#?}", meta_info);
                 if let Info::Multi(multi_info) = meta_info.info {
-                    let v = multi_info.pieces.into_value();
+                    let _v = multi_info.pieces.into_value();
                     // println!("{}", v);
                     println!(
                         "{}",

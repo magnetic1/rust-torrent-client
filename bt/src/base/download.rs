@@ -529,7 +529,7 @@ pub mod download_inline {
 #[cfg(test)]
 mod test {
     use crate::bencode::hash::Sha1;
-    use std::fs::{File, OpenOptions};
+    use std::fs::{OpenOptions};
     use std::io;
     use std::io::{Read, Seek};
 
