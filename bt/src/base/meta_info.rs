@@ -278,7 +278,6 @@ mod tests {
     use crate::base::meta_info::{Info, TorrentMetaInfo};
     use crate::bencode::decode::{DecodeError, DecodeTo, Decoder};
     use crate::bencode::value::{FromValue, IntoValue, Value};
-    use bencode::util::ByteString;
     use std::fs;
     use std::fs::File;
     use std::io::Read;
@@ -323,28 +322,6 @@ mod tests {
         if let Info::Multi(multi_info) = torrent_meta_info.info {
             println!("piece length: {}", multi_info.piece_length / 1024 / 1024)
         }
-    }
-
-    #[test]
-    fn bencode() {
-        let filename =
-            r#"D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"#;
-        println!("Loading {}", filename);
-
-        // read the torrent file into a byte vector
-        let mut f = File::open(filename).unwrap();
-        let mut v = Vec::new();
-        f.read_to_end(&mut v).unwrap();
-
-        // decode the byte vector into a struct
-        let bencode = bencode::from_vec(v).unwrap();
-
-        if let bencode::Bencode::Dict(ref map) = bencode {
-            let key: ByteString = bencode::util::ByteString::from_str("announce-list");
-            let s = map.get(&key).unwrap();
-            println!("{}", String::from_utf8(s.to_bytes().unwrap()).unwrap())
-        }
-        //        let result = FromBencode::from_bencode(&bencode).unwrap();
     }
 
     #[test]
