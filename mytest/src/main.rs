@@ -1,18 +1,15 @@
-use crate::State::Magenta;
-use crossterm::style::{Print, Styler};
+use crossterm::style::Print;
 use crossterm::{
     cursor,
     style::{self, Colorize},
-    terminal, Command, ExecutableCommand, QueueableCommand, Result,
+    terminal, Command, ExecutableCommand, Result,
 };
-use std::fmt::Display;
-use std::io::{stdout, Stdout, Write};
-use std::thread::Thread;
+use std::io::{stdout, Stdout};
+use std::thread;
 use std::time::Duration;
-use std::{fmt, result, thread};
 
 fn main() -> Result<()> {
-    let mut stdout = stdout();
+    let stdout = stdout();
 
     // in this loop we are more efficient by not flushing the buffer.
     // stdout.execute(Print("----------start---------\n"))?;
@@ -112,7 +109,7 @@ impl Printer {
     }
 
     fn clear_state(&mut self) -> Result<()> {
-        let mut log_cursor = cursor::position()?.1 - self.state_lines + 1;
+        let log_cursor = cursor::position()?.1 - self.state_lines + 1;
         self.stdout.execute(cursor::MoveTo(0, log_cursor))?;
         self.stdout
             .execute(terminal::Clear(terminal::ClearType::FromCursorDown))?;
