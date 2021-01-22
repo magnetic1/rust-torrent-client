@@ -10,24 +10,3 @@ members = [
     "bt",
     "mytest",
 ]
-
-[dependencies]
-#base = {path = "./base"}
-#encoding = "0.2"
-#hex = {version = "0.3", default-features = false, optional = true}
-
-# A (mostly) pure-Rust implementation of various common cryptographic algorithms.
-rust-crypto = "0.2"
-rand = "0.3"
-getopts = "0.2"
-hyper = "0.10"
-url = "0.2"
-futures = "0.3.0"
-
-bencode = "0.1"
-#log = "0.4.0"
-#env_logger = "0.7.1"
-#snafu = "0.6.6"
-[dependencies.async-std]
-version = "1.5.0"
-features = ["unstable"]
