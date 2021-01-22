@@ -116,31 +116,3 @@ impl Printer {
         Ok(())
     }
 }
-
-fn print_log(stdout: &mut Stdout, y: u16, log: &str, state: impl Command) -> Result<u16> {
-    let mut now = cursor::position()?.1;
-
-    while now >= y {
-        stdout.execute(terminal::Clear(terminal::ClearType::CurrentLine))?;
-        now = now - 1;
-    }
-    stdout.execute(cursor::MoveTo(0, cursor::position()?.1))?;
-    stdout.execute(Print(format!("{}\n", log)))?;
-    let new_y = cursor::position()?.1;
-    stdout.execute(state)?;
-
-    Ok(new_y)
-}
-
-fn fresh_state(stdout: &mut Stdout, y: u16, new_state: impl Command) -> Result<()> {
-    let mut now = cursor::position()?.1;
-
-    while now >= y {
-        stdout.execute(terminal::Clear(terminal::ClearType::CurrentLine))?;
-        now = now - 1;
-    }
-    stdout.execute(cursor::MoveTo(0, cursor::position()?.1))?;
-    stdout.execute(new_state)?;
-
-    Ok(())
-}
