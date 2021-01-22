@@ -22,7 +22,6 @@ surf = "2.1.0"
 
 tokio = { version = "0.3", features = ["full"] }
 futures = "0.3.0"
-parallel-stream = "2.1.1"
 
 bencode = "0.1"
 
