@@ -440,7 +440,7 @@ impl<T: DecodeTo> DecodeTo for Vec<T> {
 impl DecodeTo for Vec<Sha1> {
     fn decode(d: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         let bytes = d.read_byte_string()?;
-        Ok(Sha1::to_sha1list(&bytes))
+        Ok(Sha1::sha1_list(&bytes))
     }
 }
 

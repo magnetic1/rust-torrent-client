@@ -16,7 +16,7 @@ impl Sha1 {
         let mut buf: Vec<u8> = vec![0; hasher.output_bytes()];
         hasher.result(&mut buf);
 
-        let sha1 = Sha1::to_sha1list(&buf).swap_remove(0);
+        let sha1 = Sha1::sha1_list(&buf).swap_remove(0);
         return sha1;
     }
 
@@ -33,7 +33,7 @@ impl Sha1 {
         unsafe { String::from_utf8_unchecked(buf.to_vec()) }
     }
 
-    pub fn to_sha1list(bytes: &[u8]) -> Vec<Sha1> {
+    pub fn sha1_list(bytes: &[u8]) -> Vec<Sha1> {
         let len = 20;
         let mut i = 20;
         let mut res = Vec::with_capacity(bytes.len() / 20);
@@ -90,7 +90,7 @@ fn hash_test() {
     assert_eq!(hash.to_hex(), String::from_utf8(vec![b'f'; 40]).unwrap());
 
     let vec = [(16 * 16 - 1) as u8; 60].to_vec();
-    let sha1_vec = Sha1::to_sha1list(&vec);
+    let sha1_vec = Sha1::sha1_list(&vec);
     assert_eq!(sha1_vec, vec![hash.clone(); 3]);
 
     println!("{:#}", hash)

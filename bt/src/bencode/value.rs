@@ -73,7 +73,7 @@ impl fmt::Display for Value {
         match self {
             Value::Bytes(s) => {
                 //                let s = hex::encode(s);
-                let sha1_list = Sha1::to_sha1list(s);
+                let sha1_list = Sha1::sha1_list(s);
                 //                println!("{}", s);
                 write!(f, "(\n")?;
                 for sha1 in sha1_list {
@@ -141,7 +141,7 @@ impl FromValue for String {
 impl FromValue for Vec<Sha1> {
     fn from_value(value: &Value) -> Result<Self, DecodeError> {
         if let Value::Bytes(bytes) = value {
-            return Ok(Sha1::to_sha1list(&bytes));
+            return Ok(Sha1::sha1_list(&bytes));
         };
         Err(DecodeError::ExtraneousData)
     }
