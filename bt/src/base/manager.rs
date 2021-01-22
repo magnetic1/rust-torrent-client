@@ -1,25 +1,18 @@
-use async_std::{
-    sync::{Arc, Mutex},
-    fs::{File, OpenOptions},
-};
-use futures::{
-    select,
-    FutureExt,
-    StreamExt,
-    SinkExt,
-    channel::mpsc,
-    channel::mpsc::{Sender},
-};
+use crate::net::tracker::{TrackerMessage, TrackerSupervisor};
 use crate::{
-    net::peer_connection::{RequestMetadata, Peer, peer_conn_loop},
+    base::download::{download_inline, download_loop, Piece},
     base::ipc::{Message, IPC},
-    base::download::{Piece, download_loop, download_inline},
     base::meta_info::TorrentMetaInfo,
     base::spawn_and_log_error,
+    net::peer_connection::{peer_conn_loop, Peer, RequestMetadata},
 };
-use std::collections::{HashMap, VecDeque};
-use crate::net::tracker::{TrackerMessage, TrackerSupervisor};
+use async_std::{
+    fs::{File, OpenOptions},
+    sync::{Arc, Mutex},
+};
 use futures::channel::mpsc::UnboundedSender;
+use futures::{channel::mpsc, channel::mpsc::Sender, select, FutureExt, SinkExt, StreamExt};
+use std::collections::{HashMap, VecDeque};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -32,20 +25,34 @@ pub struct Manager {
     file_paths: Vec<String>,
 }
 
-fn connect(send_handshake_first: bool, peer: Peer, peers: &mut HashMap<Peer, Sender<IPC>>,
-                 our_peer_id: String, manager: &mut Manager, mut disconnect_sender: Sender<Peer>,
-                 sender_unbounded: UnboundedSender<ManagerEvent>,
-                 sender_to_download: Sender<ManagerEvent>) {
+fn connect(
+    send_handshake_first: bool,
+    peer: Peer,
+    peers: &mut HashMap<Peer, Sender<IPC>>,
+    our_peer_id: String,
+    manager: &mut Manager,
+    mut disconnect_sender: Sender<Peer>,
+    sender_unbounded: UnboundedSender<ManagerEvent>,
+    sender_to_download: Sender<ManagerEvent>,
+) {
     let (peer_sender, peer_receiver) = mpsc::channel(10);
-    let params = (send_handshake_first, our_peer_id,
-                  manager.meta_info.info_hash(), peer.clone(), peer_sender.clone(),
-                  peer_receiver, sender_unbounded, sender_to_download);
+    let params = (
+        send_handshake_first,
+        our_peer_id,
+        manager.meta_info.info_hash(),
+        peer.clone(),
+        peer_sender.clone(),
+        peer_receiver,
+        sender_unbounded,
+        sender_to_download,
+    );
     // start peer conn loop
     spawn_and_log_error(async move {
         let peer = params.3.clone();
-        let res = peer_conn_loop(params.0, params.1,
-                                 params.2, params.3, params.4,
-                                 params.5, params.6, params.7).await;
+        let res = peer_conn_loop(
+            params.0, params.1, params.2, params.3, params.4, params.5, params.6, params.7,
+        )
+        .await;
         disconnect_sender.send(peer).await.unwrap();
         println!("peer connection finished");
         res
@@ -64,8 +71,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
     println!("create_file_infos finished");
 
-    let (file_offsets, file_paths, files)
-        = download_inline::create_files(file_infos).await?;
+    let (file_offsets, file_paths, files) = download_inline::create_files(file_infos).await?;
     println!("create_files finished");
 
     let len = file_offsets[file_offsets.len() - 1];
@@ -85,15 +91,20 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         file_paths,
     };
 
-    let _down_handle = spawn_and_log_error(
-        download_loop(download_receiver, sender_unbounded.clone(),
-                      Arc::clone(&manager.files), manager.file_offsets.clone(),
-                      manager.our_peer_id.clone(), manager.meta_info.clone())
-    );
+    let _down_handle = spawn_and_log_error(download_loop(
+        download_receiver,
+        sender_unbounded.clone(),
+        Arc::clone(&manager.files),
+        manager.file_offsets.clone(),
+        manager.our_peer_id.clone(),
+        manager.meta_info.clone(),
+    ));
 
     let mut tracker_supervisor = TrackerSupervisor::new(
-        manager.meta_info.clone(), manager.our_peer_id.clone(),
-        54654, sender_unbounded.clone(),
+        manager.meta_info.clone(),
+        manager.our_peer_id.clone(),
+        54654,
+        sender_unbounded.clone(),
     );
     let _tracker_handle = spawn_and_log_error(async move {
         let res = tracker_supervisor.start().await;
@@ -141,22 +152,34 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                 for (p, s) in peers.iter_mut() {
                     match s.send(ipc.clone()).await {
                         Ok(()) => (),
-                        Err(_) => { delete_keys.push(p.clone()); }
+                        Err(_) => {
+                            delete_keys.push(p.clone());
+                        }
                     }
                 }
                 println!("manger loop: Broadcast end");
-                delete_keys.iter().map(|p| {
-                    peers.remove(p);
-                    match peers_deque.pop_front() {
-                        Some((send_handshake_first, peer)) => {
-                            // peers.
-                            connect(send_handshake_first, peer, &mut peers,
-                                    our_peer_id.clone(), &mut manager, disconnect_sender.clone(),
-                                    sender_unbounded.clone(), sender_to_download.clone());
+                let _r: Vec<()> = delete_keys
+                    .iter()
+                    .map(|p| {
+                        peers.remove(p);
+                        match peers_deque.pop_front() {
+                            Some((send_handshake_first, peer)) => {
+                                // peers.
+                                connect(
+                                    send_handshake_first,
+                                    peer,
+                                    &mut peers,
+                                    our_peer_id.clone(),
+                                    &mut manager,
+                                    disconnect_sender.clone(),
+                                    sender_unbounded.clone(),
+                                    sender_to_download.clone(),
+                                );
+                            }
+                            None => {}
                         }
-                        None => {}
-                    }
-                });
+                    })
+                    .collect::<Vec<()>>();
             }
             ManagerEvent::Connection(send_handshake_first, peer) => {
                 let pair = (send_handshake_first, peer);
@@ -164,27 +187,34 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                 if peers.get(peer).is_some() || peers_deque.contains(&pair) {
                     continue;
                 } else if peers.len() < 10 {
-                    connect(send_handshake_first, pair.1, &mut peers,
-                            our_peer_id.clone(), &mut manager, disconnect_sender.clone(),
-                            sender_unbounded.clone(), sender_to_download.clone());
+                    connect(
+                        send_handshake_first,
+                        pair.1,
+                        &mut peers,
+                        our_peer_id.clone(),
+                        &mut manager,
+                        disconnect_sender.clone(),
+                        sender_unbounded.clone(),
+                        sender_to_download.clone(),
+                    );
 
-                    // let (peer_sender, peer_receiver) = mpsc::channel(10);
-                    // let params = (send_handshake_first, our_peer_id.clone(),
-                    //               manager.meta_info.info_hash(), peer.clone(), peer_sender.clone(),
-                    //               peer_receiver, sender_unbounded.clone(), sender_to_download.clone());
-                    // let mut disconnect_sender = disconnect_sender.clone();
-                    // // start peer conn loop
-                    // spawn_and_log_error(async move {
-                    //     let peer = params.3.clone();
-                    //     let res = peer_conn_loop(params.0, params.1,
-                    //                              params.2, params.3, params.4,
-                    //                              params.5, params.6, params.7).await;
-                    //     disconnect_sender.send(peer).await.unwrap();
-                    //     println!("peer connection finished");
-                    //     res
-                    // });
-                    // let peer = pair.1;
-                    // assert!(peers.insert(peer, peer_sender.clone()).is_none());
+                // let (peer_sender, peer_receiver) = mpsc::channel(10);
+                // let params = (send_handshake_first, our_peer_id.clone(),
+                //               manager.meta_info.info_hash(), peer.clone(), peer_sender.clone(),
+                //               peer_receiver, sender_unbounded.clone(), sender_to_download.clone());
+                // let mut disconnect_sender = disconnect_sender.clone();
+                // // start peer conn loop
+                // spawn_and_log_error(async move {
+                //     let peer = params.3.clone();
+                //     let res = peer_conn_loop(params.0, params.1,
+                //                              params.2, params.3, params.4,
+                //                              params.5, params.6, params.7).await;
+                //     disconnect_sender.send(peer).await.unwrap();
+                //     println!("peer connection finished");
+                //     res
+                // });
+                // let peer = pair.1;
+                // assert!(peers.insert(peer, peer_sender.clone()).is_none());
                 } else {
                     let peer = pair.1;
                     peers_deque.push_back((send_handshake_first, peer));
@@ -217,7 +247,12 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                 if name.ends_with(".temp") {
                     let new_name = &name[..name.len() - 5];
                     async_std::fs::rename(name, new_name).await?;
-                    let new_file = OpenOptions::new().create(true).read(true).write(true).open(new_name).await?;
+                    let new_file = OpenOptions::new()
+                        .create(true)
+                        .read(true)
+                        .write(true)
+                        .open(new_name)
+                        .await?;
                     let mut file = manager.files[file_index].lock().await;
                     *file = new_file;
                     // = Arc::new(Mutex::new(new_file));
@@ -225,21 +260,22 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                 }
             }
 
-            ManagerEvent::Tracker(trackerMessage) => {
-                match trackerMessage {
-                    TrackerMessage::Peers(peers) => {
-                        let mut sender = sender_unbounded.clone();
-                        async_std::task::spawn(async move {
-                            for p in peers {
-                                sender.send(ManagerEvent::Connection(true, p)).await;
-                            }
-                        });
-                    }
+            ManagerEvent::Tracker(tracker_message) => match tracker_message {
+                TrackerMessage::Peers(peers) => {
+                    let mut sender = sender_unbounded.clone();
+                    async_std::task::spawn(async move {
+                        for p in peers {
+                            sender
+                                .send(ManagerEvent::Connection(true, p))
+                                .await
+                                .map_err(|e| println!("error: {}", e))
+                                .unwrap();
+                        }
+                    });
                 }
-            }
+            },
 
             e => sender_to_download.send(e).await?,
-
             // ManagerEvent::RequireData(_, _) => {}
             // ManagerEvent::RequireIncompleteBlocks(_, _) => {}
             // ManagerEvent::Download(message) => {

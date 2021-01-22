@@ -27,7 +27,6 @@ use futures::{
     StreamExt,
 };
 
-
 pub const BLOCK_SIZE: u32 = 16 * 1024;
 
 struct Block {
@@ -529,7 +528,7 @@ pub mod download_inline {
 #[cfg(test)]
 mod test {
     use crate::bencode::hash::Sha1;
-    use std::fs::{OpenOptions};
+    use std::fs::OpenOptions;
     use std::io;
     use std::io::{Read, Seek};
 
@@ -541,9 +540,9 @@ mod test {
         let mut my_file_2 = OpenOptions::new().read(true).open(my_path_2).unwrap();
 
         let mut my_bytes = vec![0u8; 262_144];
-        my_file_1.seek(io::SeekFrom::Start(216_530_944));
+        my_file_1.seek(io::SeekFrom::Start(216_530_944)).unwrap();
         my_file_1.read(&mut my_bytes[0..244_165]).unwrap();
-        my_file_2.seek(io::SeekFrom::Start(0));
+        my_file_2.seek(io::SeekFrom::Start(0)).unwrap();
         my_file_2.read(&mut my_bytes[244_165..262_144]).unwrap();
 
         let path_1 = r#"D:\MyVideo\电影\动漫\[Sakurato.sub] Yahari Ore no Seishun Love Come wa Machigatteiru Kan [03][HEVC-10Bit][1080P]\[Sakurato.sub] Yahari Ore no Seishun Love Come wa Machigatteiru Kan [03][HEVC-10Bit][1080P].mkv"#;
@@ -551,9 +550,9 @@ mod test {
         let mut file_1 = OpenOptions::new().read(true).open(path_1).unwrap();
         let mut file_2 = OpenOptions::new().read(true).open(path_2).unwrap();
         let mut bytes = vec![0u8; 262_144];
-        file_1.seek(io::SeekFrom::Start(216_530_944));
+        file_1.seek(io::SeekFrom::Start(216_530_944)).unwrap();
         file_1.read(&mut bytes[0..244_165]).unwrap();
-        file_2.seek(io::SeekFrom::Start(0));
+        file_2.seek(io::SeekFrom::Start(0)).unwrap();
         file_2.read(&mut bytes[244_165..262_144]).unwrap();
 
         println!("{:?}", Sha1::calculate_sha1(&bytes));

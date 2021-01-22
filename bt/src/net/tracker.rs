@@ -1,29 +1,19 @@
+use crate::base::manager::ManagerEvent;
 use crate::{
-    bencode::value::{FromValue, Value},
-    bencode::decode::{Decoder, DecodeTo, DecodeError},
-    net::peer_connection::Peer,
     base::meta_info::TorrentMetaInfo,
+    bencode::decode::{DecodeError, DecodeTo, Decoder},
+    bencode::value::{FromValue, Value},
+    net::peer_connection::Peer,
 };
-use hyper::{
-    Client,
-    Uri,
-    body::Buf,
-    Request,
-    Response,
-    Body,
-};
-use url::percent_encoding::{percent_encode, FORM_URLENCODED_ENCODE_SET};
+use futures::channel::mpsc::UnboundedSender;
+use futures::SinkExt;
+use hyper::{body::Buf, Body, Client, Request, Response, Uri};
 use parallel_stream::prelude::*;
 use rand::Rng;
-use std::error::Error;
 use std::convert::TryFrom;
+use std::error::Error;
 use std::time::Duration;
-use futures::channel::mpsc::UnboundedSender;
-use crate::base::manager::ManagerEvent;
-use futures::SinkExt;
-
-
-
+use url::percent_encoding::{percent_encode, FORM_URLENCODED_ENCODE_SET};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -41,8 +31,12 @@ pub enum TrackerMessage {
 }
 
 impl TrackerSupervisor {
-    pub fn new(meta_info: TorrentMetaInfo, peer_id: String,
-               listener_port: u16, sender: UnboundedSender<ManagerEvent>) -> TrackerSupervisor {
+    pub fn new(
+        meta_info: TorrentMetaInfo,
+        peer_id: String,
+        listener_port: u16,
+        sender: UnboundedSender<ManagerEvent>,
+    ) -> TrackerSupervisor {
         TrackerSupervisor {
             meta_info,
             sender,
@@ -54,12 +48,11 @@ impl TrackerSupervisor {
     fn has_announce_list(&self) -> bool {
         match &self.meta_info.announce_list {
             Some(_) => true,
-            None => false
+            None => false,
         }
     }
 
     pub async fn start(&mut self) -> Result<()> {
-
         if self.has_announce_list() {
             self.announce_list_loop().await?;
         } else {
@@ -79,10 +72,12 @@ impl TrackerSupervisor {
         let announce = meta_info.announce.as_mut().unwrap();
 
         loop {
-            match try_announce(announce, peer_id, info_hash, len,  self.listener_port).await {
+            match try_announce(announce, peer_id, info_hash, len, self.listener_port).await {
                 Ok(tracker_response) => {
                     let peers = tracker_response.peers;
-                    self.sender.send(ManagerEvent::Tracker(TrackerMessage::Peers(peers))).await?;
+                    self.sender
+                        .send(ManagerEvent::Tracker(TrackerMessage::Peers(peers)))
+                        .await?;
                 }
                 Err(_) => {
                     async_std::task::sleep(Duration::from_secs(5)).await;
@@ -124,7 +119,8 @@ impl TrackerSupervisor {
                 let h = async_std::task::spawn(async move {
                     loop {
                         println!("try {}", announce);
-                        let result = try_announce(&announce, &peer_id, &info_hash, len,  listener_port).await;
+                        let result =
+                            try_announce(&announce, &peer_id, &info_hash, len, listener_port).await;
                         match result {
                             Err(e) => {
                                 println!("error: {}", e);
@@ -132,11 +128,15 @@ impl TrackerSupervisor {
                             }
                             Ok(response) => {
                                 let peers = response.peers;
-                                sender.send(ManagerEvent::Tracker(TrackerMessage::Peers(peers))).await;
+                                sender
+                                    .send(ManagerEvent::Tracker(TrackerMessage::Peers(peers)))
+                                    .await
+                                    .map_err(|e| println!("error: {}", e))
+                                    .unwrap();
                             }
                         };
                         async_std::task::sleep(Duration::from_secs(60 * 60 * 5)).await;
-                    };
+                    }
                     ()
                 });
                 handles.push(h);
@@ -170,33 +170,43 @@ fn shuffle_announce_list(announce_list: &mut Vec<Vec<String>>) {
     }
 }
 
-async fn announce_list_try(peer_id: &str, meta_info: &mut TorrentMetaInfo, listener_port: u16) -> Result<TrackerResponse> {
-    let info_hash = &meta_info.info_hash().0;
-    let len = meta_info.length();
-    let announce_list = meta_info.announce_list.as_mut().unwrap();
-    let mut error: Box<dyn Error + Send + Sync> = Box::try_from("announce_list is empty").unwrap();
+// async fn announce_list_try(
+//     peer_id: &str,
+//     meta_info: &mut TorrentMetaInfo,
+//     listener_port: u16,
+// ) -> Result<TrackerResponse> {
+//     let info_hash = &meta_info.info_hash().0;
+//     let len = meta_info.length();
+//     let announce_list = meta_info.announce_list.as_mut().unwrap();
+//     let mut error: Box<dyn Error + Send + Sync> = Box::try_from("announce_list is empty").unwrap();
+//
+//     for tier in announce_list {
+//         for (i, announce) in tier.iter().enumerate() {
+//             // try announce
+//             println!("try {}", announce);
+//             let result = try_announce(announce, peer_id, info_hash, len, listener_port).await;
+//             error = match result {
+//                 Err(e) => {
+//                     println!("error: {}", e);
+//                     e
+//                 }
+//                 Ok(response) => {
+//                     crate::bencode::hash::swap_to_head(tier, i);
+//                     return Ok(response);
+//                 }
+//             };
+//         }
+//     }
+//     Err(error)
+// }
 
-    for tier in announce_list {
-        for (i, announce) in tier.iter().enumerate() {
-            // try announce
-            println!("try {}", announce);
-            let result = try_announce(announce, peer_id, info_hash, len,  listener_port).await;
-            error = match result {
-                Err(e) => {
-                    println!("error: {}", e);
-                    e
-                }
-                Ok(response) => {
-                    crate::bencode::hash::swap_to_head(tier, i);
-                    return Ok(response);
-                }
-            };
-        }
-    }
-    Err(error)
-}
-
-async fn try_announce(announce: &str, peer_id: &str, info_hash: &[u8; 20], length: u64, listener_port: u16) -> Result<TrackerResponse> {
+async fn try_announce(
+    announce: &str,
+    peer_id: &str,
+    info_hash: &[u8; 20],
+    length: u64,
+    listener_port: u16,
+) -> Result<TrackerResponse> {
     // let announce = announce.to_owned();
     // let peer_id = peer_id.to_owned();
     // let info_hash = info_hash.to_vec();
@@ -213,7 +223,7 @@ async fn try_announce(announce: &str, peer_id: &str, info_hash: &[u8; 20], lengt
 fn knuth_shuffle<T>(list: &mut [T]) {
     let mut rng = rand::thread_rng();
 
-    for i in 0..list.len()-1 {
+    for i in 0..list.len() - 1 {
         let k = list.len() - i - 1;
         list.swap(k, rng.gen_range(0, k));
     }
@@ -221,9 +231,7 @@ fn knuth_shuffle<T>(list: &mut [T]) {
 
 pub async fn get_peer(t: &TorrentMetaInfo) {
     let _announces = match t.announce_list {
-        Some(ref v) => {
-            v[0].iter().map(|s| s.clone()).collect::<Vec<String>>()
-        }
+        Some(ref v) => v[0].iter().map(|s| s.clone()).collect::<Vec<String>>(),
         None => {
             let s = t.announce.as_ref().unwrap().clone();
             vec![s]
@@ -244,62 +252,77 @@ pub async fn get_peer(t: &TorrentMetaInfo) {
     //     .await;
 }
 
-async fn get_tracker_response_async(peer_id: &str, announce: &str, length: u64,
-                              info_hash: &[u8], listener_port: u16) -> Result<TrackerResponse> {
+// async fn get_tracker_response_async(
+//     peer_id: &str,
+//     announce: &str,
+//     length: u64,
+//     info_hash: &[u8],
+//     listener_port: u16,
+// ) -> Result<TrackerResponse> {
+//     let length_string = length.to_string();
+//     let encoded_info_hash = percent_encode(info_hash, FORM_URLENCODED_ENCODE_SET);
+//     let listener_port_string = listener_port.to_string();
+//
+//     let params = vec![
+//         ("left", length_string.as_ref()),
+//         ("info_hash", encoded_info_hash.as_ref()),
+//         ("downloaded", "0"),
+//         ("uploaded", "0"),
+//         ("event", "started"),
+//         ("peer_id", peer_id),
+//         ("compact", "1"),
+//         ("port", listener_port_string.as_ref()),
+//     ];
+//
+//     let stream = async_std::net::TcpStream::connect("127.0.0.1:48582").await?;
+//     let url = http_types::Url::parse(&format!("{}?{}", announce, encode_query_params(&params)))?;
+//     println!("{}", url.as_str());
+//
+//     let mut req = http_types::Request::new(http_types::Method::Get, url);
+//     req.insert_header("Connection", "close");
+//
+//     let mut http_res = async_h1::connect(stream.clone(), req).await?;
+//
+//     let body = http_res.body_bytes().await?;
+//     // let buf = hyper::body::to_bytes(http_res).await?;
+//     // let mut body = buf.bytes();
+//     println!("{}", body.len());
+//
+//     let res = TrackerResponse::parse(&body)?;
+//
+//     println!("{:#?}", res);
+//     Ok(res)
+// }
+
+async fn get_tracker_response_surf(
+    peer_id: &str,
+    announce: &str,
+    length: u64,
+    info_hash: &[u8],
+    listener_port: u16,
+) -> Result<TrackerResponse> {
     let length_string = length.to_string();
     let encoded_info_hash = percent_encode(info_hash, FORM_URLENCODED_ENCODE_SET);
     let listener_port_string = listener_port.to_string();
 
-    let params = vec![("left", length_string.as_ref()),
-                      ("info_hash", encoded_info_hash.as_ref()),
-                      ("downloaded", "0"),
-                      ("uploaded", "0"),
-                      ("event", "started"),
-                      ("peer_id", peer_id),
-                      ("compact", "1"),
-                      ("port", listener_port_string.as_ref())];
-
-    let stream = async_std::net::TcpStream::connect("127.0.0.1:48582").await?;
-    let url = http_types::Url::parse(&format!("{}?{}", announce, encode_query_params(&params)))?;
-    println!("{}", url.as_str());
-
-    let mut req = http_types::Request::new(http_types::Method::Get, url);
-    req.insert_header("Connection", "close");
-
-    let mut http_res = async_h1::connect( stream.clone(), req).await?;;
-
-    let body = http_res.body_bytes().await?;
-    // let buf = hyper::body::to_bytes(http_res).await?;
-    // let mut body = buf.bytes();
-    println!("{}", body.len());
-
-    let res = TrackerResponse::parse(&body)?;
-
-    println!("{:#?}", res);
-    Ok(res)
-}
-
-async fn get_tracker_response_surf(peer_id: &str, announce: &str, length: u64,
-                              info_hash: &[u8], listener_port: u16) -> Result<TrackerResponse> {
-    let length_string = length.to_string();
-    let encoded_info_hash = percent_encode(info_hash, FORM_URLENCODED_ENCODE_SET);
-    let listener_port_string = listener_port.to_string();
-
-    let params = vec![("left", length_string.as_ref()),
-                      ("info_hash", encoded_info_hash.as_ref()),
-                      ("downloaded", "0"),
-                      ("uploaded", "0"),
-                      ("event", "started"),
-                      ("peer_id", peer_id),
-                      ("compact", "1"),
-                      ("port", listener_port_string.as_ref())];
+    let params = vec![
+        ("left", length_string.as_ref()),
+        ("info_hash", encoded_info_hash.as_ref()),
+        ("downloaded", "0"),
+        ("uploaded", "0"),
+        ("event", "started"),
+        ("peer_id", peer_id),
+        ("compact", "1"),
+        ("port", listener_port_string.as_ref()),
+    ];
 
     let url = format!("{}?{}", announce, encode_query_params(&params));
     println!("{}", url);
 
     let req = surf::get(&url)
         .header("Connection", "close")
-        .body(surf::Body::empty()).await?;
+        .body(surf::Body::empty())
+        .await?;
     let body = surf::http::Body::from_reader(req, None);
     let buf = body.into_bytes().await?;
     //
@@ -321,20 +344,27 @@ async fn get_tracker_response_surf(peer_id: &str, announce: &str, length: u64,
     Ok(res)
 }
 
-async fn get_tracker_response(peer_id: &str, announce: &str, length: u64,
-                              info_hash: &[u8], listener_port: u16) -> Result<TrackerResponse> {
+async fn get_tracker_response(
+    peer_id: &str,
+    announce: &str,
+    length: u64,
+    info_hash: &[u8],
+    listener_port: u16,
+) -> Result<TrackerResponse> {
     let length_string = length.to_string();
     let encoded_info_hash = percent_encode(info_hash, FORM_URLENCODED_ENCODE_SET);
     let listener_port_string = listener_port.to_string();
 
-    let params = vec![("left", length_string.as_ref()),
-                      ("info_hash", encoded_info_hash.as_ref()),
-                      ("downloaded", "0"),
-                      ("uploaded", "0"),
-                      ("event", "started"),
-                      ("peer_id", peer_id),
-                      ("compact", "1"),
-                      ("port", listener_port_string.as_ref())];
+    let params = vec![
+        ("left", length_string.as_ref()),
+        ("info_hash", encoded_info_hash.as_ref()),
+        ("downloaded", "0"),
+        ("uploaded", "0"),
+        ("event", "started"),
+        ("peer_id", peer_id),
+        ("compact", "1"),
+        ("port", listener_port_string.as_ref()),
+    ];
 
     let url = format!("{}?{}", announce, encode_query_params(&params));
     println!("{}", url);
@@ -357,21 +387,38 @@ async fn get_tracker_response(peer_id: &str, announce: &str, length: u64,
     Ok(res)
 }
 
-pub async fn get_tracker_response_by_meta_info(announce: &str, peer_id: &str,
-                                               meta_info: &TorrentMetaInfo,
-                                               listener_port: u16) -> Result<TrackerResponse> {
+pub async fn get_tracker_response_by_meta_info(
+    announce: &str,
+    peer_id: &str,
+    meta_info: &TorrentMetaInfo,
+    listener_port: u16,
+) -> Result<TrackerResponse> {
     let info_hash = &meta_info.info_hash().0;
-    get_tracker_response(peer_id, announce, meta_info.length(), info_hash, listener_port).await
+    get_tracker_response(
+        peer_id,
+        announce,
+        meta_info.length(),
+        info_hash,
+        listener_port,
+    )
+    .await
 }
 
-pub async fn get_peers(peer_id: &str, metainfo: &TorrentMetaInfo, listener_port: u16) -> Result<Vec<Peer>> {
+pub async fn get_peers(
+    peer_id: &str,
+    metainfo: &TorrentMetaInfo,
+    listener_port: u16,
+) -> Result<Vec<Peer>> {
     let announce = "http://explodie.org:6969/announce";
     let res = get_tracker_response_by_meta_info(announce, peer_id, metainfo, listener_port).await?;
     Ok(res.peers)
 }
 
 fn encode_query_params(params: &[(&str, &str)]) -> String {
-    let param_strings: Vec<String> = params.iter().map(|&(k, v)| format!("{}={}", k, v)).collect();
+    let param_strings: Vec<String> = params
+        .iter()
+        .map(|&(k, v)| format!("{}={}", k, v))
+        .collect();
     param_strings.join("&")
 }
 
@@ -397,16 +444,12 @@ impl FromValue for TrackerResponse {
         let peers_value = value.get_value("peers")?;
 
         let peers: Vec<Peer> = match peers_value {
-            Value::List(_) => {
-                FromValue::from_value(peers_value)?
-            }
-            Value::Bytes(b) => {
-                b.chunks(6).map(Peer::from_bytes).collect()
-            }
+            Value::List(_) => FromValue::from_value(peers_value)?,
+            Value::Bytes(b) => b.chunks(6).map(Peer::from_bytes).collect(),
             v => {
                 println!("{:#?}", v);
                 Err(DecodeError::ExtraneousData)?
-            },
+            }
         };
 
         let response = TrackerResponse {
@@ -422,11 +465,11 @@ impl FromValue for TrackerResponse {
 
 #[cfg(test)]
 mod test {
-    use std::fs;
-    use crate::bencode::decode::{Decoder, DecodeTo};
     use crate::base::meta_info::TorrentMetaInfo;
+    use crate::bencode::decode::{DecodeTo, Decoder};
     use crate::net::tracker::get_peers;
     use rand::Rng;
+    use std::fs;
 
     const PEER_ID_PREFIX: &'static str = "-RC0001-";
 
@@ -444,13 +487,16 @@ mod test {
         });
         match res {
             Ok(_) => {}
-            Err(e) => { println!("{:#?}", e) }
+            Err(e) => println!("{:#?}", e),
         }
     }
 
     fn generate_peer_id() -> String {
         let mut rng = rand::thread_rng();
-        let rand_chars: String = rng.gen_ascii_chars().take(20 - PEER_ID_PREFIX.len()).collect();
+        let rand_chars: String = rng
+            .gen_ascii_chars()
+            .take(20 - PEER_ID_PREFIX.len())
+            .collect();
         format!("{}{}", PEER_ID_PREFIX, rand_chars)
     }
 }
