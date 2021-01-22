@@ -10,37 +10,6 @@ use std::time::Duration;
 
 fn main() -> Result<()> {
     let stdout = stdout();
-
-    // in this loop we are more efficient by not flushing the buffer.
-    // stdout.execute(Print("----------start---------\n"))?;
-    //
-    // let state = style::PrintStyledContent("1█".magenta());
-    // stdout.execute(state)?;
-    // let (_, y) = cursor::position()?;
-    // for i in 0..5 {
-    //     thread::sleep(Duration::from_millis(500));
-    //
-    //     stdout.execute(terminal::Clear(terminal::ClearType::CurrentLine))?;
-    //     stdout.execute(cursor::MoveTo(0, cursor::position()?.1))?;
-    //     stdout.execute(Print(format!("{}\n", i)));
-    //     stdout.execute(state)?;
-    // }
-    //
-    // stdout.execute(terminal::Clear(terminal::ClearType::CurrentLine))?;
-    // stdout.execute(cursor::MoveTo(0, cursor::position()?.1))?;
-    // stdout.execute(style::PrintStyledContent("2█".magenta()))?;
-
-    // let mut y = cursor::position()?.1;
-    // y = print_log(&mut stdout, y, "------start------", Print(""))?;
-    // let mut state = style::PrintStyledContent("1█".magenta());
-    // fresh_state(&mut stdout, y, state)?;
-    // for i in 0..5 {
-    //     thread::sleep(Duration::from_millis(500));
-    //     y = print_log(&mut stdout, y, &*format!("{}", i), state)?;
-    // }
-    // state = style::PrintStyledContent("2█".magenta());
-    // fresh_state(&mut stdout, y, state)?;
-
     let mut printer = Printer::new(stdout);
 
     printer.print_log("------start------")?;
