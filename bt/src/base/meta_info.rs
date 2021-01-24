@@ -279,8 +279,6 @@ mod tests {
     use crate::bencode::decode::{DecodeError, DecodeTo, Decoder};
     use crate::bencode::value::{FromValue, IntoValue, Value};
     use std::fs;
-    use std::fs::File;
-    use std::io::Read;
 
     #[test]
     fn it_works() {

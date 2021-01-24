@@ -8,19 +8,20 @@ edition = "2018"
 
 [dependencies]
 # getopts: handle terminal command
-getopts = "0.2"
+getopts = "0.2.0"
 # rand
-rand = "0.3"
-rust-crypto = "0.2"
+rand = "0.3.0"
+# sha1 algorithm
+rust-crypto = "0.2.0"
 
 # surf: http service
 surf = "2.1.0"
-url = "0.2"
+url = "0.2.0"
 
 futures = "0.3.0"
 
 [dependencies.async-std]
-version = "1.6.2"
+version = "~1.6.2"
 features = ["unstable"]
 
 #[dev-dependencies]
