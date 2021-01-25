@@ -97,7 +97,7 @@ impl Download {
         &mut self,
         piece_index: u32,
         block_index: u32,
-        data: Vec<u8>,
+        data: &[u8],
     ) -> Result<()> {
         let piece = &mut self.pieces[piece_index as usize];
 
@@ -112,7 +112,7 @@ impl Download {
             &self.file_offsets,
             piece.offset,
             block_index,
-            &data,
+            data,
         )
         .await?;
         // println!("store_block： {} {}", piece_index, block_index);
@@ -260,10 +260,10 @@ pub async fn download_loop(
         match event {
             ManagerEvent::Download(Message::Piece(piece_index, offset, data)) => {
                 let block_index = offset / BLOCK_SIZE;
-                download.store(piece_index, block_index, data).await?;
+                download.store(piece_index, block_index, &data).await?;
                 println!(
-                    "finish store block: (Piece({}, {}, size=16384))",
-                    piece_index, offset
+                    "finish store block: (Piece({}, {}, size={}))",
+                    piece_index, offset, data.len()
                 );
             }
             ManagerEvent::RequireData(request_data, sender) => {
