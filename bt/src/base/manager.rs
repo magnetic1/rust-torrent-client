@@ -63,7 +63,7 @@ fn connect(
 
 pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
     let (mut sender_to_download, download_receiver) = mpsc::channel(10);
-    let (sender_unbounded, mut events_unbounded) = mpsc::unbounded();
+    let (mut sender_unbounded, mut events_unbounded) = mpsc::unbounded();
     // let (mut sender_unbounded, mut events_unbounded) = mpsc::unbounded();
     let mut peers: HashMap<Peer, Sender<IPC>> = HashMap::new();
     let mut peers_deque: VecDeque<(bool, Peer)> = VecDeque::new();
@@ -106,22 +106,22 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         54654,
         sender_unbounded.clone(),
     );
-    let _tracker_handle = spawn_and_log_error(async move {
-        let res = tracker_supervisor.start().await;
-        println!("tracker supervisor finished");
-        res
-    });
+    // let _tracker_handle = spawn_and_log_error(async move {
+    //     let res = tracker_supervisor.start().await;
+    //     println!("tracker supervisor finished");
+    //     res
+    // });
 
-    // {
-    //     let mut ps = Vec::new();
-    //     ps.push(Peer {
-    //         ip: "127.0.0.1".to_string(),
-    //         port: 54682,
-    //     });
-    //     for p in ps {
-    //         sender_unbounded.send(ManagerEvent::Connection(true, p)).await?;
-    //     }
-    // }
+    {
+        let mut ps = Vec::new();
+        ps.push(Peer {
+            ip: "127.0.0.1".to_string(),
+            port: 54682,
+        });
+        for p in ps {
+            sender_unbounded.send(ManagerEvent::Connection(true, p)).await?;
+        }
+    }
 
     let (disconnect_sender, mut disconnect_receiver) = mpsc::channel(10);
 
