@@ -5,6 +5,7 @@ pub mod download;
 pub mod ipc;
 pub mod manager;
 pub mod meta_info;
+pub mod terminal;
 
 pub fn spawn_and_log_error<F>(fut: F) -> task::JoinHandle<()>
 where

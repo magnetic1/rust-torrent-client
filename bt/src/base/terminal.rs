@@ -2,11 +2,17 @@ use crossterm::style::Print;
 use crossterm::{
     cursor,
     style::{self, Colorize},
-    terminal, ExecutableCommand, Result,
+    terminal, ExecutableCommand,
 };
 use std::io::{stdout, Stdout};
 use std::thread;
 use std::time::Duration;
+use crate::base::spawn_and_log_error;
+use once_cell::sync::Lazy;
+use crossbeam::channel::{unbounded, Sender};
+
+
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn main() -> Result<()> {
     let stdout = stdout();
@@ -18,7 +24,7 @@ fn main() -> Result<()> {
     printer.fresh_state(State::Magenta("1█".to_string()))?;
     for i in 0..20 {
         thread::sleep(Duration::from_millis(500));
-        printer.print_log(&format!("{}", i))?;
+        printer.print_log(&*format!("{}", i))?;
     }
     printer.fresh_state(State::Magenta("2█".to_string()))?;
 
@@ -36,6 +42,11 @@ enum State {
     Magenta(String),
 }
 
+enum PrintMessage {
+    Log(String),
+    State(State),
+}
+
 impl State {
     fn print_state(&self, stdout: &mut Stdout) -> Result<()> {
         match self {
@@ -49,6 +60,34 @@ impl State {
 
         Ok(())
     }
+}
+
+// static mut SENDER: Option<Sender<PrintMessage>> = None;
+// static mut JOIN_HANDLE: Option<task::JoinHandle<()>> = None;
+static QUEUE: Lazy<Sender<PrintMessage>> = Lazy::new(|| {
+    let (mut sender, receiver) = unbounded();
+
+    let _j = spawn_and_log_error(async move {
+        let stdout = stdout();
+        let mut printer = Printer::new(stdout);
+        loop {
+            let pm = receiver.recv()?;
+            match pm {
+                PrintMessage::Log(s) => {
+                    printer.print_log(&s)?;
+                }
+                PrintMessage::State(state) => {
+                    printer.fresh_state(state)?;
+                }
+            }
+        }
+    });
+    sender
+});
+
+fn print(log: String) -> Result<()> {
+    QUEUE.send(PrintMessage::Log(log))?;
+    Ok(())
 }
 
 impl Printer {
@@ -82,6 +121,22 @@ impl Printer {
         self.stdout.execute(cursor::MoveTo(0, log_cursor))?;
         self.stdout
             .execute(terminal::Clear(terminal::ClearType::FromCursorDown))?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::base::terminal::print;
+    use std::time::Duration;
+
+    type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+    #[test]
+    fn print_test() -> Result<()> {
+        print("123".to_string())?;
+        print(456.to_string())?;
+        std::thread::sleep(Duration::from_micros(1000));
         Ok(())
     }
 }
