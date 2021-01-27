@@ -11,88 +11,12 @@ use crate::base::spawn_and_log_error;
 use once_cell::sync::Lazy;
 use async_channel::{unbounded, Sender};
 
-
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-fn main() -> Result<()> {
-    let stdout = stdout();
-    let mut printer = Printer::new(stdout);
-
-    printer.print_log("------start------")?;
-
-    thread::sleep(Duration::from_millis(1500));
-    printer.fresh_state(State::Magenta("1█".to_string()))?;
-    for i in 0..20 {
-        thread::sleep(Duration::from_millis(500));
-        printer.print_log(&*format!("{}", i))?;
-    }
-    printer.fresh_state(State::Magenta("2█".to_string()))?;
-
-    Ok(())
-}
 
 struct Printer {
     stdout: Stdout,
     state_lines: u16,
     state: State,
-}
-
-enum State {
-    Print(String),
-    Magenta(String),
-}
-
-enum PrintMessage {
-    Log(String),
-    State(State),
-}
-
-impl State {
-    fn print_state(&self, stdout: &mut Stdout) -> Result<()> {
-        match self {
-            State::Print(t) => {
-                stdout.execute(Print(format!("{}", t)))?;
-            }
-            State::Magenta(t) => {
-                stdout.execute(style::PrintStyledContent(t.clone().magenta()))?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-// static mut SENDER: Option<Sender<PrintMessage>> = None;
-// static mut JOIN_HANDLE: Option<task::JoinHandle<()>> = None;
-static QUEUE: Lazy<Sender<PrintMessage>> = Lazy::new(|| {
-    let (mut sender, receiver) = unbounded();
-
-    let _j = spawn_and_log_error(async move {
-        let stdout = stdout();
-        let mut printer = Printer::new(stdout);
-        loop {
-            let pm = receiver.recv().await?;
-            match pm {
-                PrintMessage::Log(s) => {
-                    printer.print_log(&s)?;
-                }
-                PrintMessage::State(state) => {
-                    printer.fresh_state(state)?;
-                }
-            }
-        }
-    });
-    sender
-});
-
-async fn print_log(log: String) -> Result<()> {
-    QUEUE.send(PrintMessage::Log(log)).await?;
-    Ok(())
-}
-
-async fn fresh_state(new_state: State) -> Result<()> {
-    QUEUE.send(PrintMessage::State(new_state)).await?;
-    Ok(())
 }
 
 impl Printer {
@@ -130,6 +54,64 @@ impl Printer {
     }
 }
 
+enum State {
+    Print(String),
+    Magenta(String),
+}
+
+enum PrintMessage {
+    Log(String),
+    State(State),
+}
+
+impl State {
+    fn print_state(&self, stdout: &mut Stdout) -> Result<()> {
+        match self {
+            State::Print(t) => {
+                stdout.execute(Print(format!("{}", t)))?;
+            }
+            State::Magenta(t) => {
+                stdout.execute(style::PrintStyledContent(t.clone().magenta()))?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// static mut SENDER: Option<Sender<PrintMessage>> = None;
+// static mut JOIN_HANDLE: Option<task::JoinHandle<()>> = None;
+static QUEUE: Lazy<Sender<PrintMessage>> = Lazy::new(|| {
+    let (mut sender, receiver) = unbounded();
+    let _j = spawn_and_log_error(async move {
+        let stdout = stdout();
+        let mut printer = Printer::new(stdout);
+        loop {
+            let pm = receiver.recv().await?;
+            match pm {
+                PrintMessage::Log(s) => {
+                    printer.print_log(&s)?;
+                }
+                PrintMessage::State(state) => {
+                    printer.fresh_state(state)?;
+                }
+            }
+        }
+    });
+    sender
+});
+
+pub async fn print_log(log: String) -> Result<()> {
+    QUEUE.send(PrintMessage::Log(log)).await?;
+    Ok(())
+}
+
+async fn fresh_state(new_state: State) -> Result<()> {
+    QUEUE.send(PrintMessage::State(new_state)).await?;
+    Ok(())
+}
+
+
 #[cfg(test)]
 mod test {
     use crate::base::terminal::{print_log, fresh_state, State};
@@ -150,6 +132,5 @@ mod test {
             task::sleep(Duration::from_micros(1000)).await;
             j.await
         })
-
     }
 }

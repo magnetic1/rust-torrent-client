@@ -23,6 +23,7 @@ use std::collections::HashMap;
 
 use async_std::task::JoinHandle;
 use futures::channel::mpsc::UnboundedSender;
+use crate::base::terminal;
 
 const PROTOCOL: &'static str = "BitTorrent protocol";
 const MAX_CONCURRENT_REQUESTS: u32 = 10;
@@ -104,9 +105,9 @@ impl PeerConnection {
     async fn receive_handshake(&mut self) -> Result<()> {
         let stream = &mut self.stream;
 
-        println!("task {}: start receive", task::current().id(),);
+        terminal::print_log(format!("task {}: start receive", task::current().id(),)).await?;
         let pstrlen = read_n(stream, 1).await?;
-        println!("{}: receive pstrlen", task::current().id(),);
+        terminal::print_log(format!("{}: receive pstrlen", task::current().id(),)).await?;
         read_n(stream, pstrlen[0] as u32).await?; // ignore pstr
         read_n(stream, 8).await?; // ignore reserved
         let info_hash = read_n(stream, 20).await?;
@@ -115,8 +116,8 @@ impl PeerConnection {
         {
             // validate info hash
             if &info_hash != &self.info_hash.0 {
-                println!("{}", crate::bencode::hash::to_hex(&info_hash));
-                println!("{}", crate::bencode::hash::to_hex(&self.info_hash.0));
+                terminal::print_log(format!("{}", crate::bencode::hash::to_hex(&info_hash))).await?;
+                terminal::print_log(format!("{}", crate::bencode::hash::to_hex(&self.info_hash.0))).await?;
 
                 Err("Error::InvalidInfoHash")?;
             }
@@ -143,7 +144,7 @@ impl PeerConnection {
         let mut req_len = self.me.requests.len();
         while req_len < MAX_CONCURRENT_REQUESTS as usize {
             let len = self.to_request.len();
-            // println!("to_request {}", len);
+            // terminal::print_log(format!("to_request {}", len)).await?;
             if len == 0 {
                 return Ok(());
             }
@@ -245,7 +246,7 @@ impl PeerConnection {
                 bytes[bytes_index] |= mask;
             }
         }
-        println!("{:?}: send bitfield", task::current().id());
+        terminal::print_log(format!("{:?}: send bitfield", task::current().id())).await?;
         self.writer_sender.send(Message::Bitfield(bytes)).await?;
         Ok(())
     }
@@ -255,7 +256,7 @@ fn start_read_loop(stream: TcpStream, ipc_sender: Sender<IPC>) -> Receiver<Void>
     let (shutdown_sender, shutdown) = mpsc::channel(1);
     spawn_and_log_error(async move {
         let res = conn_read_loop(stream, ipc_sender, shutdown_sender).await;
-        println!("conn_read_loop over!");
+        terminal::print_log(format!("conn_read_loop over!")).await?;
         res
     });
 
@@ -269,7 +270,7 @@ fn start_write_loop(
 ) -> JoinHandle<()> {
     let write_handle = spawn_and_log_error(async move {
         let e = conn_write_loop(writer_receiver, stream, ipc_sender).await;
-        println!("conn_write_loop over!");
+        terminal::print_log(format!("conn_write_loop over!")).await?;
         e
     });
 
@@ -340,7 +341,7 @@ pub async fn peer_conn_loop(
                 }
             },
         };
-        // println!("ipc loop: {:?}", ipc);
+        // terminal::print_log(format!("ipc loop: {:?}", ipc)).await?;
 
         match ipc {
             IPC::Message(message) => process_message(&mut peer_conn, message).await?,
@@ -389,16 +390,16 @@ async fn conn_read_loop(
 ) -> Result<()> {
     let stream = &mut stream;
     // let message_size = ;
-    println!("task {}: conn_read_loop", task::current().id());
+    terminal::print_log(format!("task {}: conn_read_loop", task::current().id())).await?;
     // let mut buf = vec![0; 4];
     loop {
         let message_size = bytes_to_u32(&read_n(stream, 4).await?);
         let message = if message_size > 0 {
-            // println!("{:?}: stream message len: {}", task::current().id(), message_size);
+            // terminal::print_log(format!("{:?}: stream message len: {}", task::current().id(), message_size)).await?;
             let message = read_n(stream, message_size).await?;
             Message::new(&message[0], &message[1..])
         // let m = Message::new(&message[0], &message[1..]);
-        // println!("{:?}", m);
+        // terminal::print_log(format!("{:?}", m)).await?;
         // m
         } else {
             Message::KeepAlive
@@ -415,7 +416,7 @@ async fn conn_write_loop(
 ) -> Result<()> {
     // let mut stream = &mut stream;
     let mut messages = messages.fuse();
-    println!("task {}: conn_write_loop", task::current().id());
+    terminal::print_log(format!("task {}: conn_write_loop", task::current().id())).await?;
     loop {
         select! {
             message = messages.next().fuse() => match message {
@@ -471,7 +472,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
             peer_conn.request_more_blocks().await?;
         }
         Message::Bitfield(bytes) => {
-            println!("start bitfield");
+            terminal::print_log(format!("start bitfield")).await?;
             let l = peer_conn.he.has_pieces.len();
             for have_index in 0..l {
                 let bytes_index = have_index / 8;
@@ -487,7 +488,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
             }
             peer_conn.update_my_interested_status().await?;
             peer_conn.request_more_blocks().await?;
-            println!("end bitfield");
+            terminal::print_log(format!("end bitfield")).await?;
         }
         Message::Request(piece_index, offset, length) => {
             let block_index = offset / BLOCK_SIZE;
@@ -500,7 +501,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
         Message::Piece(piece_index, offset, data) => {
             let block_index = offset / BLOCK_SIZE;
             peer_conn.me.requests.remove(piece_index, block_index);
-            // println!("Message::Piece start send");
+            // terminal::print_log(format!("Message::Piece start send")).await?;
             peer_conn
                 .manager_sender
                 .send(ManagerEvent::Download(Message::Piece(
@@ -509,7 +510,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
                     data,
                 )))
                 .await?;
-            // println!("Message::Piece finish send");
+            // terminal::print_log(format!("Message::Piece finish send")).await?;
             peer_conn.update_my_interested_status().await?;
             peer_conn.request_more_blocks().await?;
         }

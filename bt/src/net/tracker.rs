@@ -13,6 +13,8 @@ use rand::Rng;
 
 use std::time::Duration;
 use url::percent_encoding::{percent_encode, FORM_URLENCODED_ENCODE_SET};
+use crate::base::terminal;
+use async_std::task::JoinHandle;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -115,28 +117,25 @@ impl TrackerSupervisor {
                 let announce = announce.to_owned();
                 let peer_id = peer_id.to_owned();
                 // try announce
-                let h = async_std::task::spawn(async move {
+                let h: JoinHandle<Result<()>> = async_std::task::spawn(async move {
                     loop {
-                        println!("try {}", announce);
+                        terminal::print_log(format!("try {}", announce)).await?;
                         let result =
                             try_announce(&announce, &peer_id, &info_hash, len, listener_port).await;
                         match result {
                             Err(e) => {
-                                println!("error: {}", e);
                                 break;
                             }
                             Ok(response) => {
                                 let peers = response.peers;
                                 sender
                                     .send(ManagerEvent::Tracker(TrackerMessage::Peers(peers)))
-                                    .await
-                                    .map_err(|e| println!("error: {}", e))
-                                    .unwrap();
+                                    .await?
                             }
                         };
                         async_std::task::sleep(Duration::from_secs(60 * 60 * 5)).await;
                     }
-                    ()
+                    Ok(())
                 });
                 handles.push(h);
             }
@@ -211,7 +210,7 @@ async fn get_tracker_response_surf(
     ];
 
     let url = format!("{}?{}", announce, encode_query_params(&params));
-    println!("{}", url);
+    terminal::print_log(format!("{}", url)).await?;
 
     let req = surf::get(&url)
         .header("Connection", "close")
@@ -219,10 +218,10 @@ async fn get_tracker_response_surf(
         .await?;
     let body = surf::http::Body::from_reader(req, None);
     let buf = body.into_bytes().await?;
-    println!("{}", buf.len());
+    terminal::print_log(format!("{}", buf.len())).await?;
 
     let res = TrackerResponse::parse(&buf)?;
-    println!("{:#?}", res);
+    terminal::print_log(format!("{:#?}", res)).await?;
 
     Ok(res)
 }
@@ -260,7 +259,7 @@ impl FromValue for TrackerResponse {
             Value::List(_) => FromValue::from_value(peers_value)?,
             Value::Bytes(b) => b.chunks(6).map(Peer::from_bytes).collect(),
             v => {
-                println!("{:#?}", v);
+                // terminal::print_log(format!("{:#?}", v)).await?;
                 Err(DecodeError::ExtraneousData)?
             }
         };

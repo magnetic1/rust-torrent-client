@@ -13,6 +13,7 @@ use async_std::{
 use futures::channel::mpsc::UnboundedSender;
 use futures::{channel::mpsc, channel::mpsc::Sender, select, SinkExt, StreamExt};
 use std::collections::{HashMap, VecDeque};
+use crate::base::terminal;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -54,7 +55,7 @@ fn connect(
         )
         .await;
         disconnect_sender.send(peer).await.unwrap();
-        println!("peer connection finished");
+        terminal::print_log(format!("peer connection finished")).await?;
         res
     });
 
@@ -69,18 +70,18 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     let mut peers_deque: VecDeque<(bool, Peer)> = VecDeque::new();
 
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
-    println!("create_file_infos finished");
+    terminal::print_log(format!("create_file_infos finished")).await?;
 
     let (file_offsets, file_paths, files) = download_inline::create_files(file_infos).await?;
-    println!("create_files finished");
+    terminal::print_log(format!("create_files finished")).await?;
 
     let len = file_offsets[file_offsets.len() - 1];
     let pieces = download_inline::create_pieces(len, &meta_info).await;
-    println!("create_pieces finished");
-    println!("file_offsets: {:?} len: {}", file_offsets, len);
+    terminal::print_log(format!("create_pieces finished")).await?;
+    terminal::print_log(format!("file_offsets: {:?} len: {}", file_offsets, len)).await?;
 
     let ps: Vec<u32> = pieces.iter().map(|p| p.length).collect();
-    println!("pieces len: {:?}", ps);
+    terminal::print_log(format!("pieces len: {:?}", ps)).await?;
 
     let mut manager = Manager {
         our_peer_id: our_peer_id.clone(),
@@ -108,7 +109,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     );
     // let _tracker_handle = spawn_and_log_error(async move {
     //     let res = tracker_supervisor.start().await;
-    //     println!("tracker supervisor finished");
+    //     terminal::print_log(format!("tracker supervisor finished")).await?;
     //     res
     // });
 
@@ -137,17 +138,17 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
             // },
             disconnect = disconnect_receiver.next() => {
                 let peer = disconnect.unwrap();
-                println!("remove {:?}", peer);
+                terminal::print_log(format!("remove {:?}", peer)).await?;
                 assert!(peers.remove(&peer).is_some());
-                println!("{:?}: disconnected", peer);
+                terminal::print_log(format!("{:?}: disconnected", peer)).await?;
                 continue;
             },
         };
-        // println!("manger loop: {:?}", event);
+        // terminal::print_log(format!("manger loop: {:?}", event)).await?;
 
         match event {
             ManagerEvent::Broadcast(ipc) => {
-                println!("manger loop: Broadcast start");
+                terminal::print_log(format!("manger loop: Broadcast start")).await?;
                 let mut delete_keys = Vec::with_capacity(peers.len());
                 for (p, s) in peers.iter_mut() {
                     match s.send(ipc.clone()).await {
@@ -157,7 +158,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                         }
                     }
                 }
-                println!("manger loop: Broadcast end");
+                terminal::print_log(format!("manger loop: Broadcast end")).await?;
                 let _r: Vec<()> = delete_keys
                     .iter()
                     .map(|p| {
@@ -210,7 +211,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                 //                              params.2, params.3, params.4,
                 //                              params.5, params.6, params.7).await;
                 //     disconnect_sender.send(peer).await.unwrap();
-                //     println!("peer connection finished");
+                //     terminal::print_log(format!("peer connection finished")).await?;
                 //     res
                 // });
                 // let peer = pair.1;
@@ -232,7 +233,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                 //                                  params.2, params.3, params.4,
                 //                                  params.5, params.6, params.7).await;
                 //         disconnect_sender.send(peer).await.unwrap();
-                //         println!("peer connection finished");
+                //         terminal::print_log(format!("peer connection finished")).await?;
                 //         res
                 //     });
                 //     assert!(peers.insert(peer, peer_sender.clone()).is_none());
@@ -267,9 +268,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                         for p in peers {
                             sender
                                 .send(ManagerEvent::Connection(true, p))
-                                .await
-                                .map_err(|e| println!("error: {}", e))
-                                .unwrap();
+                                .await;
                         }
                     });
                 }

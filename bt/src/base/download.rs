@@ -16,6 +16,7 @@ use async_std::{
 };
 use futures::channel::mpsc::UnboundedSender;
 use futures::{channel::mpsc::Receiver, sink::SinkExt, StreamExt};
+use crate::base::terminal;
 
 pub const BLOCK_SIZE: u32 = 16 * 1024;
 
@@ -114,14 +115,16 @@ impl Download {
             block_index,
             data,
         )
-        .await?;
+            .await?;
         // println!("store_block： {} {}", piece_index, block_index);
 
         piece.blocks[block_index as usize].is_complete = true;
 
         if piece.has_all_blocks() {
             let valid = verify(piece, &**self.files, &self.file_offsets).await?;
-            println!("verify {} {} {}", piece_index, piece.length, valid);
+            terminal::print_log(
+                format!("verify {} {} {}", piece_index, piece.length, valid)
+            ).await?;
             if !valid {
                 piece.reset_blocks();
             } else {
@@ -139,12 +142,12 @@ impl Download {
         // println!("block {} complete", block_index);
         // notify peers if piece is complete
         if self.pieces[piece_index as usize].is_complete {
-            println!("Piece {} complete", piece_index);
+            terminal::print_log(format!("Piece {} complete", piece_index)).await?;
             self.broadcast(IPC::PieceComplete(piece_index)).await?;
         }
         // notify peers if download is complete
         if self.is_complete() {
-            println!("Download complete");
+            terminal::print_log(format!("Download complete")).await?;
             self.broadcast(IPC::DownloadComplete).await?;
         }
 
@@ -169,7 +172,7 @@ impl Download {
             let file_is_complete = contained_pieces.iter().all(|p| p.is_complete);
 
             if file_is_complete {
-                println!("{}: file_is_complete", i + index);
+                terminal::print_log(format!("{}: file_is_complete", i + index)).await?;
                 self.manager_sender
                     .send(ManagerEvent::FileFinish(i + index))
                     .await?;
@@ -189,7 +192,7 @@ impl Download {
                 offset,
                 request.block_length,
             )
-            .await?;
+                .await?;
             Ok(buf)
         } else {
             Err("Error::MissingPieceData")?
@@ -256,15 +259,16 @@ pub async fn download_loop(
     };
 
     while let Some(event) = rx.next().await {
-        println!("download loop: {:?}", event);
+        terminal::print_log(format!("download loop: {:?}", event)).await?;
+
         match event {
             ManagerEvent::Download(Message::Piece(piece_index, offset, data)) => {
                 let block_index = offset / BLOCK_SIZE;
                 download.store(piece_index, block_index, &data).await?;
-                println!(
-                    "finish store block: (Piece({}, {}, size={}))",
-                    piece_index, offset, data.len()
-                );
+                terminal::print_log(
+                    format!("finish store block: (Piece({}, {}, size={}))",
+                            piece_index, offset, data.len())
+                ).await?;
             }
             ManagerEvent::RequireData(request_data, sender) => {
                 let buf = download.retrieve_data(request_data).await?;
@@ -297,7 +301,7 @@ async fn verify(
     piece.is_complete = piece.hash == Sha1::calculate_sha1(&buffer);
 
     if !piece.is_complete {
-        println!("{:?}", Sha1::calculate_sha1(&buffer));
+        terminal::print_log(format!("{:?}", Sha1::calculate_sha1(&buffer)));
     }
 
     Ok(piece.is_complete)
@@ -416,6 +420,7 @@ pub mod download_inline {
     use async_std::path::Path;
     use async_std::sync::{Arc, Mutex};
     use std::fs;
+    use crate::base::terminal;
 
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -463,7 +468,7 @@ pub mod download_inline {
                 match fs::metadata(s.clone()) {
                     Ok(_) => {}
                     Err(_) => {
-                        println!("create dir: {}", s);
+                        terminal::print_log(format!("create dir: {}", s));
                         fs::create_dir_all(s).unwrap()
                     }
                 }
