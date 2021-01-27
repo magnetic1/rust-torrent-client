@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 use crate::base::spawn_and_log_error;
 use once_cell::sync::Lazy;
-use crossbeam::channel::{unbounded, Sender};
+use async_channel::{unbounded, Sender};
 
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -71,7 +71,7 @@ static QUEUE: Lazy<Sender<PrintMessage>> = Lazy::new(|| {
         let stdout = stdout();
         let mut printer = Printer::new(stdout);
         loop {
-            let pm = receiver.recv()?;
+            let pm = receiver.recv().await?;
             match pm {
                 PrintMessage::Log(s) => {
                     printer.print_log(&s)?;
@@ -85,8 +85,13 @@ static QUEUE: Lazy<Sender<PrintMessage>> = Lazy::new(|| {
     sender
 });
 
-fn print(log: String) -> Result<()> {
-    QUEUE.send(PrintMessage::Log(log))?;
+async fn print_log(log: String) -> Result<()> {
+    QUEUE.send(PrintMessage::Log(log)).await?;
+    Ok(())
+}
+
+async fn fresh_state(new_state: State) -> Result<()> {
+    QUEUE.send(PrintMessage::State(new_state)).await?;
     Ok(())
 }
 
@@ -127,16 +132,24 @@ impl Printer {
 
 #[cfg(test)]
 mod test {
-    use crate::base::terminal::print;
+    use crate::base::terminal::{print_log, fresh_state, State};
     use std::time::Duration;
+    use async_std::task;
+    use async_std::task::JoinHandle;
 
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
     #[test]
     fn print_test() -> Result<()> {
-        print("123".to_string())?;
-        print(456.to_string())?;
-        std::thread::sleep(Duration::from_micros(1000));
-        Ok(())
+        let mut j = task::spawn(async {
+            fresh_state(State::Magenta("2█".to_string())).await
+        });
+        task::block_on(async move {
+            print_log("123".to_string()).await?;
+            print_log(456.to_string()).await?;
+            task::sleep(Duration::from_micros(1000)).await;
+            j.await
+        })
+
     }
 }

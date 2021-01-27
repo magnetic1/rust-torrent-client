@@ -21,7 +21,9 @@ url = "0.2.0"
 # once_cell: Lazy
 once_cell = "*"
 # crossbeam: Sender and Receiver are Sync !
-crossbeam = "*"
+# crossbeam = "*"
+# async-channel: like crossbeam in async
+async-channel = "1.5.0"
 
 futures = "0.3.0"
 
