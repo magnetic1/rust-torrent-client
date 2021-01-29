@@ -14,6 +14,7 @@ use futures::channel::mpsc::UnboundedSender;
 use futures::{channel::mpsc, channel::mpsc::Sender, select, SinkExt, StreamExt};
 use std::collections::{HashMap, VecDeque};
 use crate::base::terminal;
+use crate::base::terminal::State;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -71,6 +72,8 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
 
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
     terminal::print_log(format!("create_file_infos finished")).await?;
+
+    terminal::fresh_state(State::Magenta("2█".to_string())).await?;
 
     let (file_offsets, file_paths, files) = download_inline::create_files(file_infos).await?;
     terminal::print_log(format!("create_files finished")).await?;
@@ -148,7 +151,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
 
         match event {
             ManagerEvent::Broadcast(ipc) => {
-                terminal::print_log(format!("manger loop: Broadcast start")).await?;
+                // terminal::print_log(format!("manger loop: Broadcast start")).await?;
                 let mut delete_keys = Vec::with_capacity(peers.len());
                 for (p, s) in peers.iter_mut() {
                     match s.send(ipc.clone()).await {
@@ -158,7 +161,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                         }
                     }
                 }
-                terminal::print_log(format!("manger loop: Broadcast end")).await?;
+                // terminal::print_log(format!("manger loop: Broadcast end")).await?;
                 let _r: Vec<()> = delete_keys
                     .iter()
                     .map(|p| {

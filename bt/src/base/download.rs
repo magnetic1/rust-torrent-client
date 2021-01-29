@@ -114,18 +114,18 @@ impl Download {
             piece.offset,
             block_index,
             data,
-        )
-            .await?;
+        ).await?;
         // println!("store_block： {} {}", piece_index, block_index);
 
         piece.blocks[block_index as usize].is_complete = true;
 
         if piece.has_all_blocks() {
             let valid = verify(piece, &**self.files, &self.file_offsets).await?;
-            terminal::print_log(
-                format!("verify {} {} {}", piece_index, piece.length, valid)
-            ).await?;
+
             if !valid {
+                terminal::print_log(
+                    format!("verify {} {} {}", piece_index, piece.length, valid)
+                ).await?;
                 piece.reset_blocks();
             } else {
                 piece.is_complete = true;
@@ -259,16 +259,16 @@ pub async fn download_loop(
     };
 
     while let Some(event) = rx.next().await {
-        terminal::print_log(format!("download loop: {:?}", event)).await?;
+        // terminal::print_log(format!("download loop: {:?}", event)).await?;
 
         match event {
             ManagerEvent::Download(Message::Piece(piece_index, offset, data)) => {
                 let block_index = offset / BLOCK_SIZE;
                 download.store(piece_index, block_index, &data).await?;
-                terminal::print_log(
-                    format!("finish store block: (Piece({}, {}, size={}))",
-                            piece_index, offset, data.len())
-                ).await?;
+                // terminal::print_log(
+                //     format!("finish store block: (Piece({}, {}, size={}))",
+                //             piece_index, offset, data.len())
+                // ).await?;
             }
             ManagerEvent::RequireData(request_data, sender) => {
                 let buf = download.retrieve_data(request_data).await?;

@@ -54,7 +54,7 @@ impl Printer {
     }
 }
 
-enum State {
+pub enum State {
     Print(String),
     Magenta(String),
 }
@@ -106,7 +106,7 @@ pub async fn print_log(log: String) -> Result<()> {
     Ok(())
 }
 
-async fn fresh_state(new_state: State) -> Result<()> {
+pub(crate) async fn fresh_state(new_state: State) -> Result<()> {
     QUEUE.send(PrintMessage::State(new_state)).await?;
     Ok(())
 }
