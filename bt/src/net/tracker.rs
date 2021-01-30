@@ -21,7 +21,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>
 #[derive(Debug)]
 pub struct TrackerSupervisor {
     meta_info: TorrentMetaInfo,
-    sender: UnboundedSender<ManagerEvent>,
+    to_manager: UnboundedSender<ManagerEvent>,
     peer_id: String,
     listener_port: u16,
 }
@@ -30,6 +30,13 @@ pub struct TrackerSupervisor {
 pub enum TrackerMessage {
     Peers(Vec<Peer>),
 }
+
+// #[derive(Debug, Eq)]
+// pub struct TrackerUrl {
+//     url: Url,
+//     position: UrlHash,
+//     tier: usize,
+// }
 
 impl TrackerSupervisor {
     pub fn new(
@@ -40,7 +47,7 @@ impl TrackerSupervisor {
     ) -> TrackerSupervisor {
         TrackerSupervisor {
             meta_info,
-            sender,
+            to_manager: sender,
             peer_id,
             listener_port,
         }
@@ -76,7 +83,7 @@ impl TrackerSupervisor {
             match try_announce(announce, peer_id, info_hash, len, self.listener_port).await {
                 Ok(tracker_response) => {
                     let peers = tracker_response.peers;
-                    self.sender
+                    self.to_manager
                         .send(ManagerEvent::Tracker(TrackerMessage::Peers(peers)))
                         .await?;
                 }
@@ -113,7 +120,7 @@ impl TrackerSupervisor {
         let mut handles = Vec::new();
         for tier in announce_list {
             for (_i, announce) in tier.iter().enumerate() {
-                let mut sender = self.sender.clone();
+                let mut sender = self.to_manager.clone();
                 let announce = announce.to_owned();
                 let peer_id = peer_id.to_owned();
                 // try announce

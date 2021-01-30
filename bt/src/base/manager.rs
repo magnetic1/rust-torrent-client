@@ -73,7 +73,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
     terminal::print_log(format!("create_file_infos finished")).await?;
 
-    terminal::fresh_state(State::Magenta("2█".to_string())).await?;
+    // terminal::fresh_state(State::Magenta("2█".to_string())).await?;
 
     let (file_offsets, file_paths, files) = download_inline::create_files(file_infos).await?;
     terminal::print_log(format!("create_files finished")).await?;
@@ -201,46 +201,10 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                         sender_unbounded.clone(),
                         sender_to_download.clone(),
                     );
-
-                // let (peer_sender, peer_receiver) = mpsc::channel(10);
-                // let params = (send_handshake_first, our_peer_id.clone(),
-                //               manager.meta_info.info_hash(), peer.clone(), peer_sender.clone(),
-                //               peer_receiver, sender_unbounded.clone(), sender_to_download.clone());
-                // let mut disconnect_sender = disconnect_sender.clone();
-                // // start peer conn loop
-                // spawn_and_log_error(async move {
-                //     let peer = params.3.clone();
-                //     let res = peer_conn_loop(params.0, params.1,
-                //                              params.2, params.3, params.4,
-                //                              params.5, params.6, params.7).await;
-                //     disconnect_sender.send(peer).await.unwrap();
-                //     terminal::print_log(format!("peer connection finished")).await?;
-                //     res
-                // });
-                // let peer = pair.1;
-                // assert!(peers.insert(peer, peer_sender.clone()).is_none());
                 } else {
                     let peer = pair.1;
                     peers_deque.push_back((send_handshake_first, peer));
                 }
-                // if peers.len() < 10 && peers.get(&peer).is_none() {
-                //     let (peer_sender, peer_receiver) = mpsc::channel(10);
-                //     let params = (send_handshake_first, our_peer_id.clone(),
-                //                   manager.meta_info.info_hash(), peer.clone(), peer_sender.clone(),
-                //                   peer_receiver, sender_unbounded.clone(), sender_to_download.clone());
-                //     let mut disconnect_sender = disconnect_sender.clone();
-                //     // start peer conn loop
-                //     spawn_and_log_error(async move {
-                //         let peer = params.3.clone();
-                //         let res = peer_conn_loop(params.0, params.1,
-                //                                  params.2, params.3, params.4,
-                //                                  params.5, params.6, params.7).await;
-                //         disconnect_sender.send(peer).await.unwrap();
-                //         terminal::print_log(format!("peer connection finished")).await?;
-                //         res
-                //     });
-                //     assert!(peers.insert(peer, peer_sender.clone()).is_none());
-                // }
             }
 
             ManagerEvent::RequirePieceLength(sender) => {

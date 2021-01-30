@@ -5,6 +5,8 @@ use crate::bencode::hash::Sha1;
 use crate::bencode::value::{FromValue, IntoValue, Value};
 use std::collections::BTreeMap;
 use std::time::Instant;
+use url::Url;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct TorrentMetaInfo {
@@ -71,11 +73,20 @@ impl TorrentMetaInfo {
         Sha1::calculate_sha1(&encoder.into_bytes())
     }
 
-    pub fn announce(&mut self) -> String {
-        match &self.announce_list {
-            Some(_v) => self.announce.clone().unwrap(),
-            None => self.announce.clone().unwrap(),
-        }
+    pub fn get_urls(&self) -> Vec<Arc<Url>> {
+        let mut urls = self.announce_list.as_ref().map(|urls_list| {
+            urls_list.iter().flat_map(|urls| {
+                urls.iter().filter_map(|url| {
+                    url.parse::<Url>().ok()
+                })
+                    .map(|url|
+                        Arc::new(url)
+                    ).collect::<Vec<Arc<Url>>>()
+            })
+                .collect::<Vec<_>>()
+        }).unwrap_or_else(Vec::new);
+
+        urls
     }
 }
 
@@ -265,7 +276,7 @@ impl IntoValue for TorrentMetaInfo {
         insert_option(&mut map, "comment", self.comment);
         insert_option(&mut map, "created by", self.created_by);
         // Todo: instant
-        //        insert_option(&mut map, "creation date", None);
+        // insert_option(&mut map, "creation date", None);
         insert_option(&mut map, "encoding", self.encoding);
         insert(&mut map, "info", self.info);
 
@@ -290,10 +301,6 @@ mod tests {
         let f = fs::read(
             "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent",
         ).unwrap();
-
-        //        let f = fs::read(
-        //            r#"D:\MyVideo\电影\里\3_xunlei\[脸肿字幕组][魔人]euphoria 目指す楽園は神聖なる儀式の先に。救世主の母は……白夜凛音！？ 編\.0D787B3AF81663F1CF1FC1EDF397DFE6F012829A.torrent"#
-        //        ).unwrap();
 
         let mut decoder = Decoder::new(f.as_slice());
 
