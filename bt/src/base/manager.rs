@@ -19,8 +19,8 @@ use crate::base::terminal::State;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub struct Manager {
-    our_peer_id: String,
-    meta_info: TorrentMetaInfo,
+    pub(crate) our_peer_id: String,
+    pub(crate) meta_info: TorrentMetaInfo,
     pieces: Vec<Piece>,
     files: Arc<Vec<Arc<Mutex<File>>>>,
     file_offsets: Vec<u64>,
@@ -30,7 +30,9 @@ pub struct Manager {
     peers_deque: VecDeque<(bool, Peer)>,
 
     sender_to_download: Sender<ManagerEvent>,
-    sender_unbounded: UnboundedSender<ManagerEvent>,
+    pub(crate) sender_unbounded: UnboundedSender<ManagerEvent>,
+
+    pub(crate) listener_port: u16
 }
 
 impl Manager {
@@ -85,7 +87,6 @@ impl Manager {
                     self.peers_deque.push_back((send_handshake_first, peer));
                 }
             }
-
             ManagerEvent::RequirePieceLength(sender) => {
                 sender.send(self.meta_info.piece_length()).unwrap();
             }
@@ -106,7 +107,6 @@ impl Manager {
                     self.file_paths[file_index] = String::from(new_name);
                 }
             }
-
             ManagerEvent::Tracker(tracker_message) => match tracker_message {
                 TrackerMessage::Peers(peers) => {
                     let mut sender = self.sender_unbounded.clone();
@@ -119,7 +119,6 @@ impl Manager {
                     });
                 }
             },
-
             e => self.sender_to_download.send(e).await?,
         }
 
@@ -161,11 +160,11 @@ fn connect(
 
 //noinspection RsTypeCheck
 pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Result<()> {
-    let (mut sender_to_download, download_receiver) = mpsc::channel(10);
-    let (mut sender_unbounded, mut events_unbounded) = mpsc::unbounded();
+    let (sender_to_download, download_receiver) = mpsc::channel(10);
+    let (sender_unbounded, mut events_unbounded) = mpsc::unbounded();
     // let (mut sender_unbounded, mut events_unbounded) = mpsc::unbounded();
-    let mut peers: HashMap<Peer, Sender<IPC>> = HashMap::new();
-    let mut peers_deque: VecDeque<(bool, Peer)> = VecDeque::new();
+    let peers: HashMap<Peer, Sender<IPC>> = HashMap::new();
+    let peers_deque: VecDeque<(bool, Peer)> = VecDeque::new();
 
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
     terminal::print_log(format!("create_file_infos finished")).await?;
@@ -195,6 +194,8 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         peers_deque,
         sender_to_download,
         sender_unbounded,
+
+        listener_port: 54654,
     };
 
     let _down_handle = spawn_and_log_error(download_loop(
@@ -206,12 +207,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         manager.meta_info.clone(),
     ));
 
-    let mut tracker_supervisor = TrackerSupervisor::new(
-        manager.meta_info.clone(),
-        manager.our_peer_id.clone(),
-        54654,
-        manager.sender_unbounded.clone(),
-    );
+    let mut tracker_supervisor = TrackerSupervisor::from_manager(&manager);
     // let _tracker_handle = spawn_and_log_error(async move {
     //     let res = tracker_supervisor.start().await;
     //     terminal::print_log(format!("tracker supervisor finished")).await?;

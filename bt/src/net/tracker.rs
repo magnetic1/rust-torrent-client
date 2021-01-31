@@ -1,4 +1,4 @@
-use crate::base::manager::ManagerEvent;
+use crate::base::manager::{ManagerEvent, Manager};
 use crate::{
     base::meta_info::TorrentMetaInfo,
     bencode::decode::{DecodeError, DecodeTo, Decoder},
@@ -50,6 +50,15 @@ impl TrackerSupervisor {
             to_manager: sender,
             peer_id,
             listener_port,
+        }
+    }
+
+    pub(crate) fn from_manager(manager: &Manager) -> TrackerSupervisor {
+        TrackerSupervisor {
+            meta_info: manager.meta_info.clone(),
+            to_manager: manager.sender_unbounded.clone(),
+            peer_id: manager.our_peer_id.clone(),
+            listener_port: manager.listener_port
         }
     }
 
