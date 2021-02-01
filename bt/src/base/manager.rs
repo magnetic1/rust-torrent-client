@@ -145,6 +145,7 @@ fn connect(
         manager.sender_unbounded.clone(),
         manager.sender_to_download.clone(),
     );
+    assert!(manager.peers.insert(peer, peer_sender.clone()).is_none());
     // start peer conn loop
     spawn_and_log_error(async move {
         let peer = params.3.clone();
@@ -157,7 +158,6 @@ fn connect(
         res
     });
 
-    assert!(manager.peers.insert(peer, peer_sender.clone()).is_none());
 }
 
 //noinspection RsTypeCheck
@@ -210,17 +210,21 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     ));
 
     let mut tracker_supervisor = TrackerSupervisor::from_manager(&manager);
-    // let _tracker_handle = spawn_and_log_error(async move {
-    //     let res = tracker_supervisor.start().await;
-    //     terminal::print_log(format!("tracker supervisor finished")).await?;
-    //     res
-    // });
+    let _tracker_handle = spawn_and_log_error(async move {
+        let res = tracker_supervisor.run().await;
+        terminal::print_log(format!("tracker supervisor finished")).await?;
+        res
+    });
 
     {
         let mut ps = Vec::new();
+        // ps.push(Peer {
+        //     ip: "127.0.0.1".to_string(),
+        //     port: 54682,
+        // });
         ps.push(Peer {
-            ip: "127.0.0.1".to_string(),
-            port: 54682,
+            ip: "51.15.169.11".to_string(),
+            port: 49419,
         });
         for p in ps {
             manager.sender_unbounded.send(ManagerEvent::Connection(true, p)).await?;
@@ -240,7 +244,8 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
             disconnect = disconnect_receiver.next() => {
                 let peer = disconnect.unwrap();
                 terminal::print_log(format!("remove {:?}", peer)).await?;
-                assert!(manager.peers.remove(&peer).is_some());
+                // assert!(manager.peers.remove(&peer).is_some());
+                manager.peers.remove(&peer);
                 terminal::print_log(format!("{:?}: disconnected", peer)).await?;
                 continue;
             },

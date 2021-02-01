@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use async_std::task::JoinHandle;
 use futures::channel::mpsc::{Receiver, Sender, UnboundedSender};
 use futures::channel::mpsc;
-use futures::SinkExt;
+use futures::{SinkExt, StreamExt};
 // use hyper::{body::Buf, Body, Client, Request};
 // use parallel_stream::prelude::*;
 use rand::Rng;
@@ -20,22 +20,24 @@ use crate::{
 use crate::base::manager::{Manager, ManagerEvent};
 use crate::base::terminal;
 use crate::peer::peer_connection::Peer;
+use crate::tracker::tracker::Tracker;
+use async_std::future::TimeoutError;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Debug)]
 pub struct TrackerSupervisor {
-    meta_info: TorrentMetaInfo,
-    to_manager: UnboundedSender<ManagerEvent>,
-    peer_id: String,
-    listener_port: u16,
+    pub(crate) meta_info: TorrentMetaInfo,
+    pub(crate) to_manager: UnboundedSender<ManagerEvent>,
+    pub(crate) peer_id: String,
+    pub(crate) listener_port: u16,
 
     /// List of urls, by tier
     urls: Vec<Arc<Url>>,
     receiver: Receiver<(Arc<Url>, Instant, TrackerStatus)>,
     /// Keep a sender to not close the channel
-    _sender: Sender<(Arc<Url>, Instant, TrackerStatus)>,
-    tracker_states: HashMap<Arc<Url>, (Instant, TrackerStatus)>,
+    pub(crate) _sender: Sender<(Arc<Url>, Instant, TrackerStatus)>,
+    pub(crate) tracker_states: HashMap<Arc<Url>, (Instant, TrackerStatus)>,
 }
 
 #[derive(Debug)]
@@ -95,18 +97,73 @@ impl TrackerSupervisor {
 
     pub async fn run(&mut self) -> Result<()> {
         self.loop_until_connected().await?;
-
+        self.wait_on_tracker_msg().await;
         Ok(())
     }
 
     async fn loop_until_connected(&mut self) -> Result<()> {
-        // let mut pending_status = Vec::with_capacity(10);
+        let mut pending_status = Vec::with_capacity(10);
 
         for url in self.urls.as_slice() {
+            self.spawn_tracker(url);
 
+            let duration = Duration::from_secs(15);
+            match async_std::future::timeout(duration, self.receiver.next()).await {
+                Ok(Some((url, instant, TrackerStatus::FoundPeers(n)))) => {
+                    pending_status.push((url, instant, TrackerStatus::FoundPeers(n)));
+                    break;
+                }
+                Ok(Some((url, instant, msg))) => {
+                    pending_status.push((url, instant, msg));
+                }
+                _ => {}
+            }
+        }
+
+        for (url, instant, status) in pending_status {
+            self.tracker_states.insert(url, (instant, status));
         }
 
         Ok(())
+    }
+
+    fn spawn_tracker(&self, url: &Arc<Url>) {
+        let mut t = Tracker::new(&self, url.clone());
+        async_std::task::spawn(async move { t.start().await });
+    }
+
+    async fn wait_on_tracker_msg(&mut self) {
+        while let Some((url, instant, status)) = self.receiver.next().await {
+            self.tracker_states.insert(url, (instant, status));
+
+            if !self.is_one_active() {
+                self.try_another_tracker().await;
+            }
+        }
+    }
+
+    async fn try_another_tracker(&self) {
+        let spawned = { self.tracker_states.keys().cloned().collect::<Vec<_>>() };
+
+        for url in self.urls.as_slice() {
+            if !spawned.contains(url) {
+                self.spawn_tracker(url);
+                return;
+            }
+        }
+    }
+
+    fn is_one_active(&self) -> bool {
+        for state in self.tracker_states.values() {
+            if let TrackerStatus::FoundPeers(n) = state.1 {
+                // We consider the tracker active if it found at least 2
+                // peer addresses
+                if n > 1 {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub async fn announce_loop(&mut self) -> Result<()> {
@@ -263,6 +320,7 @@ async fn get_tracker_response_surf(
         .body(surf::Body::empty())
         .await?;
     let body = surf::http::Body::from_reader(req, None);
+
     let buf = body.into_bytes().await?;
     terminal::print_log(format!("{}", buf.len())).await?;
 
@@ -290,7 +348,7 @@ pub struct TrackerResponse {
 }
 
 impl TrackerResponse {
-    pub fn parse(bytes: &[u8]) -> Result<TrackerResponse> {
+    pub fn parse(bytes: &[u8]) -> std::result::Result<Self, DecodeError> {
         let mut d = Decoder::new(bytes);
         let value: Value = DecodeTo::decode(&mut d)?;
         Ok(FromValue::from_value(&value)?)

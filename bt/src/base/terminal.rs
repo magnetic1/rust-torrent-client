@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 use crate::base::spawn_and_log_error;
 use once_cell::sync::Lazy;
-use async_channel::{unbounded, Sender};
+use async_channel::{unbounded, Sender, SendError};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -59,7 +59,7 @@ pub enum State {
     Magenta(String),
 }
 
-enum PrintMessage {
+pub enum PrintMessage {
     Log(String),
     State(State),
 }
@@ -101,12 +101,12 @@ static QUEUE: Lazy<Sender<PrintMessage>> = Lazy::new(|| {
     sender
 });
 
-pub async fn print_log(log: String) -> Result<()> {
+pub async fn print_log(log: String) -> std::result::Result<(), SendError<PrintMessage>> {
     QUEUE.send(PrintMessage::Log(log)).await?;
     Ok(())
 }
 
-pub(crate) async fn fresh_state(new_state: State) -> Result<()> {
+pub(crate) async fn fresh_state(new_state: State) -> std::result::Result<(), SendError<PrintMessage>> {
     QUEUE.send(PrintMessage::State(new_state)).await?;
     Ok(())
 }
@@ -122,15 +122,15 @@ mod test {
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
     #[test]
-    fn print_test() -> Result<()> {
+    fn print_test() {
         let mut j = task::spawn(async {
             fresh_state(State::Magenta("2█".to_string())).await
         });
         task::block_on(async move {
-            print_log("123".to_string()).await?;
-            print_log(456.to_string()).await?;
+            print_log("123".to_string()).await.unwrap();
+            print_log(456.to_string()).await.unwrap();
             task::sleep(Duration::from_micros(1000)).await;
-            j.await
+            j.await.unwrap()
         })
     }
 }
