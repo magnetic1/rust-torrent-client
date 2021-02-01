@@ -446,7 +446,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
         Message::Choke => {
             peer_conn.me.is_choked = true;
         }
-        Message::Unchoke => {
+        Message::UnChoke => {
             let is_choked = peer_conn.me.is_choked;
             if is_choked {
                 peer_conn.me.is_choked = false;
@@ -458,7 +458,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
             let is_choked = peer_conn.he.is_choked;
             if is_choked {
                 peer_conn.he.is_choked = false;
-                peer_conn.writer_sender.send(Message::Unchoke).await?;
+                peer_conn.writer_sender.send(Message::UnChoke).await?;
                 peer_conn.upload_next_block().await?;
             }
         }

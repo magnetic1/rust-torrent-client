@@ -13,7 +13,7 @@ pub enum IPC {
 pub enum Message {
     KeepAlive,
     Choke,
-    Unchoke,
+    UnChoke,
     Interested,
     NotInterested,
     Have(u32),
@@ -28,7 +28,7 @@ impl Message {
     pub fn new(id: &u8, body: &[u8]) -> Message {
         match *id {
             0 => Message::Choke,
-            1 => Message::Unchoke,
+            1 => Message::UnChoke,
             2 => Message::Interested,
             3 => Message::NotInterested,
             4 => Message::Have(bytes_to_u32(body)),
@@ -61,7 +61,7 @@ impl Message {
         match self {
             Message::KeepAlive => {}
             Message::Choke => payload.push(0),
-            Message::Unchoke => payload.push(1),
+            Message::UnChoke => payload.push(1),
             Message::Interested => payload.push(2),
             Message::NotInterested => payload.push(3),
             Message::Have(index) => {
@@ -129,7 +129,7 @@ impl fmt::Debug for Message {
         match *self {
             Message::KeepAlive => write!(f, "KeepAlive"),
             Message::Choke => write!(f, "Choke"),
-            Message::Unchoke => write!(f, "Unchoke"),
+            Message::UnChoke => write!(f, "Unchoke"),
             Message::Interested => write!(f, "Interested"),
             Message::NotInterested => write!(f, "NotInterested"),
             Message::Have(ref index) => write!(f, "Have({})", index),
