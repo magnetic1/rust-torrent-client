@@ -1,22 +1,23 @@
-use crate::{
-    base::{
-        ipc::{Message, IPC},
-        manager::ManagerEvent,
-        meta_info::TorrentMetaInfo,
-        Result,
-    },
-    bencode::hash::Sha1,
-    net::peer_connection::RequestMetadata,
-};
 use async_std::{
     fs::File,
     io,
     io::prelude::*,
     sync::{Arc, Mutex},
 };
-use futures::channel::mpsc::UnboundedSender;
 use futures::{channel::mpsc::Receiver, sink::SinkExt, StreamExt};
+use futures::channel::mpsc::UnboundedSender;
+
+use crate::{
+    base::{
+        ipc::{IPC, Message},
+        manager::ManagerEvent,
+        meta_info::TorrentMetaInfo,
+        Result,
+    },
+    bencode::hash::Sha1,
+};
 use crate::base::terminal;
+use crate::peer::peer_connection::RequestMetadata;
 
 pub const BLOCK_SIZE: u32 = 16 * 1024;
 
@@ -414,12 +415,14 @@ fn search_ptrs(file_offsets: &[u64], offset: u64, len: usize) -> (usize, Vec<(us
 }
 
 pub mod download_inline {
-    use crate::base::download::Piece;
-    use crate::base::meta_info::{Info, TorrentMetaInfo};
+    use std::fs;
+
     use async_std::fs::{File, OpenOptions};
     use async_std::path::Path;
     use async_std::sync::{Arc, Mutex};
-    use std::fs;
+
+    use crate::base::download::Piece;
+    use crate::base::meta_info::{Info, TorrentMetaInfo};
     use crate::base::terminal;
 
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -522,10 +525,11 @@ pub mod download_inline {
 
 #[cfg(test)]
 mod test {
-    use crate::bencode::hash::Sha1;
     use std::fs::OpenOptions;
     use std::io;
     use std::io::{Read, Seek};
+
+    use crate::bencode::hash::Sha1;
 
     #[test]
     fn file_test() {

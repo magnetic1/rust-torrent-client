@@ -1,24 +1,25 @@
-use crate::base::manager::{ManagerEvent, Manager};
-use crate::{
-    base::meta_info::TorrentMetaInfo,
-    bencode::decode::{DecodeError, DecodeTo, Decoder},
-    bencode::value::{FromValue, Value},
-    net::peer_connection::Peer,
-};
-use futures::channel::mpsc::{UnboundedSender, Receiver, Sender};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use async_std::task::JoinHandle;
+use futures::channel::mpsc::{Receiver, Sender, UnboundedSender};
+use futures::channel::mpsc;
 use futures::SinkExt;
 // use hyper::{body::Buf, Body, Client, Request};
 // use parallel_stream::prelude::*;
 use rand::Rng;
-
-use std::time::{Duration, Instant};
-use url::percent_encoding::{percent_encode, FORM_URLENCODED_ENCODE_SET};
-use crate::base::terminal;
-use async_std::task::JoinHandle;
-use std::sync::Arc;
-use std::collections::HashMap;
+use url::percent_encoding::{FORM_URLENCODED_ENCODE_SET, percent_encode};
 use url::Url;
-use futures::channel::mpsc;
+
+use crate::{
+    base::meta_info::TorrentMetaInfo,
+    bencode::decode::{DecodeError, Decoder, DecodeTo},
+    bencode::value::{FromValue, Value},
+};
+use crate::base::manager::{Manager, ManagerEvent};
+use crate::base::terminal;
+use crate::peer::peer_connection::Peer;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -31,7 +32,7 @@ pub struct TrackerSupervisor {
 
     /// List of urls, by tier
     urls: Vec<Arc<Url>>,
-    recv: Receiver<(Arc<Url>, Instant, TrackerStatus)>,
+    receiver: Receiver<(Arc<Url>, Instant, TrackerStatus)>,
     /// Keep a sender to not close the channel
     _sender: Sender<(Arc<Url>, Instant, TrackerStatus)>,
     tracker_states: HashMap<Arc<Url>, (Instant, TrackerStatus)>,
@@ -61,7 +62,7 @@ impl TrackerSupervisor {
     pub(crate) fn from_manager(manager: &Manager) -> TrackerSupervisor {
         let urls = manager.meta_info.get_urls();
 
-        let (_sender, recv) = mpsc::channel(10);;
+        let (_sender, receiver) = mpsc::channel(10);;
         TrackerSupervisor {
             meta_info: manager.meta_info.clone(),
             to_manager: manager.sender_unbounded.clone(),
@@ -70,7 +71,7 @@ impl TrackerSupervisor {
 
             urls,
             _sender,
-            recv,
+            receiver,
             tracker_states: Default::default(),
         }
     }
@@ -322,11 +323,13 @@ impl FromValue for TrackerResponse {
 
 #[cfg(test)]
 mod test {
-    use crate::base::meta_info::TorrentMetaInfo;
-    use crate::bencode::decode::{DecodeTo, Decoder};
-    use crate::tracker::tracker_supervisor::get_tracker_response_surf;
-    use rand::Rng;
     use std::fs;
+
+    use rand::Rng;
+
+    use crate::base::meta_info::TorrentMetaInfo;
+    use crate::bencode::decode::{Decoder, DecodeTo};
+    use crate::tracker::tracker_supervisor::get_tracker_response_surf;
 
     const PEER_ID_PREFIX: &'static str = "-RC0001-";
 

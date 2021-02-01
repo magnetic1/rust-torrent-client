@@ -1,20 +1,22 @@
-use crate::tracker::tracker_supervisor::{TrackerMessage, TrackerSupervisor};
-use crate::{
-    base::download::{download_inline, download_loop, Piece},
-    base::ipc::{Message, IPC},
-    base::meta_info::TorrentMetaInfo,
-    base::spawn_and_log_error,
-    net::peer_connection::{peer_conn_loop, Peer, RequestMetadata},
-};
+use std::collections::{HashMap, VecDeque};
+
 use async_std::{
     fs::{File, OpenOptions},
     sync::{Arc, Mutex},
 };
-use futures::channel::mpsc::UnboundedSender;
 use futures::{channel::mpsc, channel::mpsc::Sender, select, SinkExt, StreamExt};
-use std::collections::{HashMap, VecDeque};
+use futures::channel::mpsc::UnboundedSender;
+
+use crate::{
+    base::download::{download_inline, download_loop, Piece},
+    base::ipc::{IPC, Message},
+    base::meta_info::TorrentMetaInfo,
+    base::spawn_and_log_error,
+};
 use crate::base::terminal;
 use crate::base::terminal::State;
+use crate::peer::peer_connection::{Peer, peer_conn_loop, RequestMetadata};
+use crate::tracker::tracker_supervisor::{TrackerMessage, TrackerSupervisor};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
