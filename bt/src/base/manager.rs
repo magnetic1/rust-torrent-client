@@ -1,4 +1,4 @@
-use crate::net::tracker::{TrackerMessage, TrackerSupervisor};
+use crate::tracker::tracker_supervisor::{TrackerMessage, TrackerSupervisor};
 use crate::{
     base::download::{download_inline, download_loop, Piece},
     base::ipc::{Message, IPC},

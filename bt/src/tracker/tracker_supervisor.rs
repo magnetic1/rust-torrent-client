@@ -324,7 +324,7 @@ impl FromValue for TrackerResponse {
 mod test {
     use crate::base::meta_info::TorrentMetaInfo;
     use crate::bencode::decode::{DecodeTo, Decoder};
-    use crate::net::tracker::get_tracker_response_surf;
+    use crate::tracker::tracker_supervisor::get_tracker_response_surf;
     use rand::Rng;
     use std::fs;
 
