@@ -5,16 +5,20 @@ use crate::{
     bencode::value::{FromValue, Value},
     net::peer_connection::Peer,
 };
-use futures::channel::mpsc::UnboundedSender;
+use futures::channel::mpsc::{UnboundedSender, Receiver, Sender};
 use futures::SinkExt;
 // use hyper::{body::Buf, Body, Client, Request};
 // use parallel_stream::prelude::*;
 use rand::Rng;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use url::percent_encoding::{percent_encode, FORM_URLENCODED_ENCODE_SET};
 use crate::base::terminal;
 use async_std::task::JoinHandle;
+use std::sync::Arc;
+use std::collections::HashMap;
+use url::Url;
+use futures::channel::mpsc;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -24,6 +28,20 @@ pub struct TrackerSupervisor {
     to_manager: UnboundedSender<ManagerEvent>,
     peer_id: String,
     listener_port: u16,
+
+    /// List of urls, by tier
+    urls: Vec<Arc<Url>>,
+    recv: Receiver<(Arc<Url>, Instant, TrackerStatus)>,
+    /// Keep a sender to not close the channel
+    _sender: Sender<(Arc<Url>, Instant, TrackerStatus)>,
+    tracker_states: HashMap<Arc<Url>, (Instant, TrackerStatus)>,
+}
+
+#[derive(Debug)]
+pub enum TrackerStatus {
+    FoundPeers(usize),
+    HostUnresolved,
+    ErrorOccurred(Box<dyn std::error::Error + Send + Sync>),
 }
 
 #[derive(Debug)]
@@ -39,26 +57,21 @@ pub enum TrackerMessage {
 // }
 
 impl TrackerSupervisor {
-    pub fn new(
-        meta_info: TorrentMetaInfo,
-        peer_id: String,
-        listener_port: u16,
-        sender: UnboundedSender<ManagerEvent>,
-    ) -> TrackerSupervisor {
-        TrackerSupervisor {
-            meta_info,
-            to_manager: sender,
-            peer_id,
-            listener_port,
-        }
-    }
 
     pub(crate) fn from_manager(manager: &Manager) -> TrackerSupervisor {
+        let urls = manager.meta_info.get_urls();
+
+        let (_sender, recv) = mpsc::channel(10);;
         TrackerSupervisor {
             meta_info: manager.meta_info.clone(),
             to_manager: manager.sender_unbounded.clone(),
             peer_id: manager.our_peer_id.clone(),
-            listener_port: manager.listener_port
+            listener_port: manager.listener_port,
+
+            urls,
+            _sender,
+            recv,
+            tracker_states: Default::default(),
         }
     }
 
@@ -76,6 +89,22 @@ impl TrackerSupervisor {
             // panic!("announce unfinished!")
             self.announce_loop().await?;
         }
+        Ok(())
+    }
+
+    pub async fn run(&mut self) -> Result<()> {
+        self.loop_until_connected().await?;
+
+        Ok(())
+    }
+
+    async fn loop_until_connected(&mut self) -> Result<()> {
+        // let mut pending_status = Vec::with_capacity(10);
+
+        for url in self.urls.as_slice() {
+
+        }
+
         Ok(())
     }
 

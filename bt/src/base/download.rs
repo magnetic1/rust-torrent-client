@@ -301,7 +301,7 @@ async fn verify(
     piece.is_complete = piece.hash == Sha1::calculate_sha1(&buffer);
 
     if !piece.is_complete {
-        terminal::print_log(format!("{:?}", Sha1::calculate_sha1(&buffer)));
+        terminal::print_log(format!("{:?}", Sha1::calculate_sha1(&buffer))).await?;
     }
 
     Ok(piece.is_complete)
@@ -468,7 +468,7 @@ pub mod download_inline {
                 match fs::metadata(s.clone()) {
                     Ok(_) => {}
                     Err(_) => {
-                        terminal::print_log(format!("create dir: {}", s));
+                        terminal::print_log(format!("create dir: {}", s)).await?;
                         fs::create_dir_all(s).unwrap()
                     }
                 }
