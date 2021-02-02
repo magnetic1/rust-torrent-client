@@ -143,7 +143,7 @@ async fn get_tracker_response_surf(
     ];
 
     let url = format!("{}?{}", announce, encode_query_params(&params));
-    terminal::print_log(format!("{}", url)).await.unwrap();
+    terminal::print_log(format!("task {} : connect tracker {}", task::current().id(), announce)).await.unwrap();
 
     let mut response = surf::get(&url)
         .header("Connection", "close")
@@ -152,7 +152,7 @@ async fn get_tracker_response_surf(
     let buf = response.body_bytes().await?;
     // let body = surf::http::Body::from_reader(response, None);
     // let buf = body.into_bytes().await?;
-    terminal::print_log(format!("{}", buf.len())).await.unwrap();
+    // terminal::print_log(format!("{}", buf.len())).await.unwrap();
 
     let result = TrackerResponse::parse(&buf);
     let res = match result {
@@ -162,7 +162,7 @@ async fn get_tracker_response_surf(
             Err(TrackerError::InvalidInput)?
         }
     };
-    terminal::print_log(format!("peers len : {}", res.peers.len())).await.unwrap();
+    terminal::print_log(format!("task {} : peers len({})", task::current().id(),  res.peers.len())).await.unwrap();
 
     Ok(res)
 }

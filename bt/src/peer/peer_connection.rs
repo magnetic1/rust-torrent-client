@@ -472,7 +472,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
             peer_conn.request_more_blocks().await?;
         }
         Message::Bitfield(bytes) => {
-            terminal::print_log(format!("start bitfield")).await?;
+            // terminal::print_log(format!("start bitfield")).await?;
             let l = peer_conn.he.has_pieces.len();
             for have_index in 0..l {
                 let bytes_index = have_index / 8;
@@ -488,7 +488,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
             }
             peer_conn.update_my_interested_status().await?;
             peer_conn.request_more_blocks().await?;
-            terminal::print_log(format!("end bitfield")).await?;
+            // terminal::print_log(format!("end bitfield")).await?;
         }
         Message::Request(piece_index, offset, length) => {
             let block_index = offset / BLOCK_SIZE;

@@ -182,7 +182,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     terminal::print_log(format!("file_offsets: {:?} len: {}", file_offsets, len)).await?;
 
     let ps: Vec<u32> = pieces.iter().map(|p| p.length).collect();
-    terminal::print_log(format!("pieces len: {:?}", ps)).await?;
+    terminal::print_log(format!("pieces len: {:?}", ps[0])).await?;
 
     let mut manager = Manager {
         our_peer_id: our_peer_id.clone(),
@@ -243,7 +243,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
             // peer disconnect
             disconnect = disconnect_receiver.next() => {
                 let peer = disconnect.unwrap();
-                terminal::print_log(format!("remove {:?}", peer)).await?;
+                // terminal::print_log(format!("remove {:?}", peer)).await?;
                 // assert!(manager.peers.remove(&peer).is_some());
                 manager.peers.remove(&peer);
                 terminal::print_log(format!("{:?}: disconnected", peer)).await?;
