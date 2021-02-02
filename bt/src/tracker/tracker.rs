@@ -66,7 +66,8 @@ impl Tracker {
                 self.send_to_supervisor(HostUnresolved).await;
             }
             Err(e) => {
-                self.send_to_supervisor(ErrorOccurred(Box::new(e))).await;
+                self.send_to_supervisor(ErrorOccurred(Box::new(e.clone()))).await;
+                return Err(e);
             }
         };
 
@@ -144,26 +145,26 @@ async fn get_tracker_response_surf(
     let url = format!("{}?{}", announce, encode_query_params(&params));
     terminal::print_log(format!("{}", url)).await.unwrap();
 
-    let req = surf::get(&url)
+    let mut response = surf::get(&url)
         .header("Connection", "close")
         .body(surf::Body::empty())
         .await?;
-    let body = surf::http::Body::from_reader(req, None);
-
-    let buf = body.into_bytes().await?;
+    let buf = response.body_bytes().await?;
+    // let body = surf::http::Body::from_reader(response, None);
+    // let buf = body.into_bytes().await?;
     terminal::print_log(format!("{}", buf.len())).await.unwrap();
 
-    let res = TrackerResponse::parse(&buf);
-    let res = match res {
-        Ok(r) => Ok(r),
+    let result = TrackerResponse::parse(&buf);
+    let res = match result {
+        Ok(r) => r,
         Err(e) => {
             terminal::print_log(format!("TrackerResponse Decode error: {}", e)).await.unwrap();
-            Err(TrackerError::InvalidInput)
+            Err(TrackerError::InvalidInput)?
         }
     };
-    terminal::print_log(format!("{:#?}", res)).await.unwrap();
+    terminal::print_log(format!("peers len : {}", res.peers.len())).await.unwrap();
 
-    res
+    Ok(res)
 }
 
 fn encode_query_params(params: &[(&str, &str)]) -> String {
