@@ -235,8 +235,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                 terminal::print_log(format!("{:?}: disconnected", peer)).await?;
                 continue;
             },
-        }
-        ;
+        };
         terminal::print_log(format!("manger loop: {:?}", event)).await?;
 
         manager.process_event(event, &disconnect_sender).await?;
@@ -261,4 +260,16 @@ pub enum ManagerEvent {
     RequireHavePieces(futures::channel::oneshot::Sender<Vec<bool>>),
 
     Tracker(TrackerMessage),
+}
+
+
+#[cfg(test)]
+mod test {
+    use std::mem::size_of;
+    use crate::base::manager::ManagerEvent;
+
+    #[test]
+    fn size_of_manager_event() {
+        println!("{}", size_of::<ManagerEvent>())
+    }
 }
