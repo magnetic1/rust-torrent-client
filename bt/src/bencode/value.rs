@@ -115,7 +115,10 @@ impl DecodeTo for Value {
                     Ok(Value::Bytes(bytes))
                 }
             },
-            b => Err(DecodeError::InvalidByte(b)),
+            b => {
+                println!("{}", String::from_utf8_lossy(d.get_ref()));
+                Err(DecodeError::InvalidByte(b))
+            },
         }
     }
 }

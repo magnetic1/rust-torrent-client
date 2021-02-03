@@ -77,7 +77,7 @@ impl Manager {
                 let ref peer = pair.1;
                 if self.peers.get(peer).is_some() || self.peers_deque.contains(&pair) {
                     // continue;
-                } else if self.peers.len() < 10 {
+                } else if self.peers.len() < 30 {
                     connect(
                         send_handshake_first,
                         pair.1,

@@ -31,7 +31,7 @@ impl Tracker {
         Tracker {
             metadata: Arc::new(ts.meta_info.clone()),
             to_manager: ts.to_manager.clone(),
-            peer_id: Arc::new("".to_string()),
+            peer_id: Arc::new(ts.peer_id.to_string()),
             url,
             tracker_supervisor: ts._sender.clone(),
             interval: 120,
@@ -142,6 +142,7 @@ async fn get_tracker_response_surf(
         ("port", listener_port_string.as_ref()),
     ];
 
+    // terminal::print_log(format!("task {} : connect tracker peer_id len({})", task::current().id(), peer_id.len())).await.unwrap();
     let url = format!("{}?{}", announce, encode_query_params(&params));
     terminal::print_log(format!("task {} : connect tracker {}", task::current().id(), announce)).await.unwrap();
 
