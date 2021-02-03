@@ -24,9 +24,8 @@ pub struct Manager {
     pub(crate) our_peer_id: String,
     pub(crate) meta_info: TorrentMetaInfo,
     pieces: Vec<Piece>,
-    files: Arc<Vec<Arc<Mutex<File>>>>,
     file_offsets: Vec<u64>,
-    file_paths: Vec<String>,
+    file_paths: Vec<Arc<String>>,
 
     peers: HashMap<Peer, Sender<IPC>>,
     peers_deque: VecDeque<(bool, Peer)>,
@@ -42,7 +41,7 @@ impl Manager {
         match event {
             ManagerEvent::Continue => {}
             ManagerEvent::Broadcast(ipc) => {
-                // terminal::print_log(format!("manger loop: Broadcast start")).await?;
+                terminal::print_log(format!("Broadcast {:?}", ipc)).await?;
                 let mut delete_keys = Vec::with_capacity(self.peers.len());
                 for (p, s) in self.peers.iter_mut() {
                     match s.send(ipc.clone()).await {
@@ -92,22 +91,9 @@ impl Manager {
             ManagerEvent::RequirePieceLength(sender) => {
                 sender.send(self.meta_info.piece_length()).unwrap();
             }
-            ManagerEvent::FileFinish(file_index) => {
-                let name = &self.file_paths[file_index];
-                if name.ends_with(".temp") {
-                    let new_name = &name[..name.len() - 5];
-                    async_std::fs::rename(name, new_name).await?;
-                    let new_file = OpenOptions::new()
-                        .create(true)
-                        .read(true)
-                        .write(true)
-                        .open(new_name)
-                        .await?;
-                    let mut file = self.files[file_index].lock().await;
-                    *file = new_file;
+            ManagerEvent::FileFinish(file_index, file_path) => {
                     // = Arc::new(Mutex::new(new_file));
-                    self.file_paths[file_index] = String::from(new_name);
-                }
+                    self.file_paths[file_index] = file_path;
             }
             ManagerEvent::Tracker(tracker_message) => match tracker_message {
                 TrackerMessage::Peers(peers) => {
@@ -188,9 +174,8 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         our_peer_id: our_peer_id.clone(),
         meta_info,
         pieces,
-        files: Arc::new(files),
         file_offsets,
-        file_paths,
+        file_paths: file_paths.clone(),
 
         peers,
         peers_deque,
@@ -203,7 +188,8 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     let _down_handle = spawn_and_log_error(download_loop(
         download_receiver,
         manager.sender_unbounded.clone(),
-        Arc::clone(&manager.files),
+        file_paths,
+        files,
         manager.file_offsets.clone(),
         manager.our_peer_id.clone(),
         manager.meta_info.clone(),
@@ -251,7 +237,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
             },
         }
         ;
-        // terminal::print_log(format!("manger loop: {:?}", event)).await?;
+        terminal::print_log(format!("manger loop: {:?}", event)).await?;
 
         manager.process_event(event, &disconnect_sender).await?;
     }
@@ -267,7 +253,7 @@ pub enum ManagerEvent {
     Connection(bool, Peer),
 
     RequirePieceLength(futures::channel::oneshot::Sender<usize>),
-    FileFinish(usize),
+    FileFinish(usize, Arc<String>),
 
     Download(Message),
     RequireData(RequestMetadata, futures::channel::oneshot::Sender<Vec<u8>>),

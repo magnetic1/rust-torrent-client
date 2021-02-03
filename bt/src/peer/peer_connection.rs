@@ -151,8 +151,8 @@ impl PeerConnection {
             // remove a block at random from to_request
             let (piece_index, block_index, block_length) = {
                 // todo: random index
-                let index = rand::thread_rng().gen_range(0, len);
-                // let index = 0;
+                // let index = rand::thread_rng().gen_range(0, len);
+                let index = 0;
                 let target = self.to_request.keys().nth(index).unwrap().clone();
                 self.to_request.remove(&target).unwrap()
             };
