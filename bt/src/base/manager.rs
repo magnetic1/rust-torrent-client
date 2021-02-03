@@ -216,20 +216,20 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         res
     });
 
-    // {
-    //     let mut ps = Vec::new();
-    //     // ps.push(Peer {
-    //     //     ip: "127.0.0.1".to_string(),
-    //     //     port: 54682,
-    //     // });
-    //     ps.push(Peer {
-    //         ip: "51.15.169.11".to_string(),
-    //         port: 49419,
-    //     });
-    //     for p in ps {
-    //         manager.sender_unbounded.send(ManagerEvent::Connection(true, p)).await?;
-    //     }
-    // }
+    {
+        let mut ps = Vec::new();
+        ps.push(Peer {
+            ip: "127.0.0.1".to_string(),
+            port: 54682,
+        });
+        // ps.push(Peer {
+        //     ip: "117.22.236.149".to_string(),
+        //     port: 51413,
+        // });
+        for p in ps {
+            manager.sender_unbounded.send(ManagerEvent::Connection(true, p)).await?;
+        }
+    }
 
     let (disconnect_sender, mut disconnect_receiver) = mpsc::channel(10);
 

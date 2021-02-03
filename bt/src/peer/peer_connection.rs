@@ -69,7 +69,7 @@ pub struct PeerConnection {
 
     writer_sender: Sender<Message>,
     manager_sender: UnboundedSender<ManagerEvent>,
-    require: Sender<ManagerEvent>,
+    to_download: Sender<ManagerEvent>,
 }
 
 impl PeerConnection {
@@ -181,7 +181,7 @@ impl PeerConnection {
             Some(r) => {
                 let data = {
                     let (sender, receiver) = futures::channel::oneshot::channel();
-                    self.require
+                    self.to_download
                         .send(ManagerEvent::RequireData(r.clone(), sender))
                         .await?;
                     receiver.await?
@@ -199,7 +199,7 @@ impl PeerConnection {
     async fn queue_blocks(&mut self, piece_index: u32) -> Result<()> {
         let incomplete_blocks = {
             let (sender, receiver) = futures::channel::oneshot::channel();
-            self.require
+            self.to_download
                 .send(ManagerEvent::RequireIncompleteBlocks(piece_index, sender))
                 .await?;
             receiver.await?
@@ -314,7 +314,7 @@ pub async fn peer_conn_loop(
         upload_in_progress: false,
         writer_sender,
         manager_sender,
-        require,
+        to_download: require,
     };
 
     peer_conn.handshake(send_handshake_first).await?;
@@ -503,7 +503,7 @@ async fn process_message(peer_conn: &mut PeerConnection, message: Message) -> Re
             peer_conn.me.requests.remove(piece_index, block_index);
             // terminal::print_log(format!("Message::Piece start send")).await?;
             peer_conn
-                .manager_sender
+                .to_download
                 .send(ManagerEvent::Download(Message::Piece(
                     piece_index,
                     offset,
