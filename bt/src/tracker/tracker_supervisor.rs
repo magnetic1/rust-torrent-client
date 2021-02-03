@@ -60,11 +60,11 @@ pub enum TrackerMessage {
 // }
 
 impl TrackerSupervisor {
-
     pub(crate) fn from_manager(manager: &Manager) -> TrackerSupervisor {
         let urls = manager.meta_info.get_urls();
 
-        let (_sender, receiver) = mpsc::channel(10);;
+        let (_sender, receiver) = mpsc::channel(10);
+        ;
         TrackerSupervisor {
             meta_info: manager.meta_info.clone(),
             to_manager: manager.sender_unbounded.clone(),
@@ -350,8 +350,15 @@ pub struct TrackerResponse {
 impl TrackerResponse {
     pub fn parse(bytes: &[u8]) -> std::result::Result<Self, DecodeError> {
         let mut d = Decoder::new(bytes);
-        let value: Value = DecodeTo::decode(&mut d)?;
-        Ok(FromValue::from_value(&value)?)
+
+        DecodeTo::decode(&mut d)
+            .and_then(|value| {
+                FromValue::from_value(&value)
+            })
+            .map_err(|error| {
+                println!("{}", String::from_utf8_lossy(d.get_ref()));
+                error
+            })
     }
 }
 
