@@ -1,7 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
 use async_std::{
-    fs::{File, OpenOptions},
     sync::{Arc, Mutex},
 };
 use futures::{channel::mpsc, channel::mpsc::Sender, select, SinkExt, StreamExt};
