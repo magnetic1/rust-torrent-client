@@ -46,7 +46,7 @@ impl Tracker {
                 Ok(_) => {}
                 Err(TrackerError::Unresponsive) => {},
                 Err(e) => {
-                    terminal::print_log(format!("error: {}", e)).await.unwrap();
+                    terminal::print_log(format!("error: {}", e)).unwrap();
                     break;
                 },
             }
@@ -142,9 +142,9 @@ async fn get_tracker_response_surf(
         ("port", listener_port_string.as_ref()),
     ];
 
-    // terminal::print_log(format!("task {} : connect tracker peer_id len({})", task::current().id(), peer_id.len())).await.unwrap();
+    // terminal::print_log(format!("task {} : connect tracker peer_id len({})", task::current().id(), peer_id.len())).unwrap();
     let url = format!("{}?{}", announce, encode_query_params(&params));
-    terminal::print_log(format!("task {} : connect tracker {}", task::current().id(), announce)).await.unwrap();
+    terminal::print_log(format!("task {} : connect tracker {}", task::current().id(), announce)).unwrap();
 
     let mut response = surf::get(&url)
         .header("Connection", "close")
@@ -153,17 +153,17 @@ async fn get_tracker_response_surf(
     let buf = response.body_bytes().await?;
     // let body = surf::http::Body::from_reader(response, None);
     // let buf = body.into_bytes().await?;
-    // terminal::print_log(format!("{}", buf.len())).await.unwrap();
+    // terminal::print_log(format!("{}", buf.len())).unwrap();
 
     let result = TrackerResponse::parse(&buf);
     let res = match result {
         Ok(r) => r,
         Err(e) => {
-            terminal::print_log(format!("TrackerResponse Decode error: {}", e)).await.unwrap();
+            terminal::print_log(format!("TrackerResponse Decode error: {}", e)).unwrap();
             Err(TrackerError::InvalidInput)?
         }
     };
-    terminal::print_log(format!("task {} : peers len({})", task::current().id(),  res.peers.len())).await.unwrap();
+    terminal::print_log(format!("task {} : peers len({})", task::current().id(),  res.peers.len())).unwrap();
 
     Ok(res)
 }

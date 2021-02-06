@@ -40,7 +40,7 @@ impl Manager {
         match event {
             ManagerEvent::Continue => {}
             ManagerEvent::Broadcast(ipc) => {
-                terminal::print_log(format!("Broadcast {:?}", ipc)).await?;
+                terminal::print_log(format!("Broadcast {:?}", ipc))?;
                 let mut delete_keys = Vec::with_capacity(self.peers.len());
                 for (p, s) in self.peers.iter_mut() {
                     match s.send(ipc.clone()).await {
@@ -50,7 +50,7 @@ impl Manager {
                         }
                     }
                 }
-                // terminal::print_log(format!("manger loop: Broadcast end")).await?;
+                // terminal::print_log(format!("manger loop: Broadcast end"))?;
                 let _r: Vec<()> = delete_keys
                     .iter()
                     .map(|p| {
@@ -139,7 +139,7 @@ fn connect(
         )
             .await;
         disconnect_sender.send(peer).await.unwrap();
-        terminal::print_log(format!("peer connection finished")).await?;
+        terminal::print_log(format!("peer connection finished"))?;
         res
     });
 
@@ -154,20 +154,20 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     let peers_deque: VecDeque<(bool, Peer)> = VecDeque::new();
 
     let file_infos = download_inline::create_file_infos(&meta_info.info).await;
-    terminal::print_log(format!("create_file_infos finished")).await?;
+    terminal::print_log(format!("create_file_infos finished"))?;
 
-    // terminal::fresh_state(State::Magenta("2█".to_string())).await?;
+    // terminal::fresh_state(State::Magenta("2█".to_string()))?;
 
     let (file_offsets, file_paths, files) = download_inline::create_files(file_infos).await?;
-    terminal::print_log(format!("create_files finished")).await?;
+    terminal::print_log(format!("create_files finished"))?;
 
     let len = file_offsets[file_offsets.len() - 1];
     let pieces = download_inline::create_pieces(len, &meta_info).await;
-    terminal::print_log(format!("create_pieces finished")).await?;
-    terminal::print_log(format!("file_offsets: {:?} len: {}", file_offsets, len)).await?;
+    terminal::print_log(format!("create_pieces finished"))?;
+    terminal::print_log(format!("file_offsets: {:?} len: {}", file_offsets, len))?;
 
     let ps: Vec<u32> = pieces.iter().map(|p| p.length).collect();
-    terminal::print_log(format!("pieces len: {:?}", ps[0])).await?;
+    terminal::print_log(format!("pieces len: {:?}", ps[0]))?;
 
     let mut manager = Manager {
         our_peer_id: our_peer_id.clone(),
@@ -197,7 +197,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     let mut tracker_supervisor = TrackerSupervisor::from_manager(&manager);
     let _tracker_handle = spawn_and_log_error(async move {
         let res = tracker_supervisor.run().await;
-        terminal::print_log(format!("tracker supervisor finished")).await?;
+        terminal::print_log(format!("tracker supervisor finished"))?;
         res
     });
 
@@ -228,14 +228,14 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
             // peer disconnect
             disconnect = disconnect_receiver.next() => {
                 let peer = disconnect.unwrap();
-                // terminal::print_log(format!("remove {:?}", peer)).await?;
+                // terminal::print_log(format!("remove {:?}", peer))?;
                 // assert!(manager.peers.remove(&peer).is_some());
                 manager.peers.remove(&peer);
-                terminal::print_log(format!("{:?}: disconnected", peer)).await?;
+                terminal::print_log(format!("{:?}: disconnected", peer))?;
                 continue;
             },
         };
-        terminal::print_log(format!("manger loop: {:?}", event)).await?;
+        terminal::print_log(format!("manger loop: {:?}", event))?;
 
         manager.process_event(event, &disconnect_sender).await?;
     }

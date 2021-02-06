@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 use crate::base::spawn_and_log_error;
 use once_cell::sync::Lazy;
-use async_channel::{unbounded, Sender, SendError};
+use crossbeam::channel::{unbounded, Sender, SendError, RecvError};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -83,11 +83,11 @@ impl State {
 // static mut JOIN_HANDLE: Option<task::JoinHandle<()>> = None;
 static QUEUE: Lazy<Sender<PrintMessage>> = Lazy::new(|| {
     let (mut sender, receiver) = unbounded();
-    let _j = spawn_and_log_error(async move {
+    let _j = thread::spawn(move || -> Result<()> {
         let stdout = stdout();
         let mut printer = Printer::new(stdout);
         loop {
-            let pm = receiver.recv().await?;
+            let pm = receiver.recv()?;
             match pm {
                 PrintMessage::Log(s) => {
                     printer.print_log(&s)?;
@@ -101,13 +101,13 @@ static QUEUE: Lazy<Sender<PrintMessage>> = Lazy::new(|| {
     sender
 });
 
-pub async fn print_log(log: String) -> std::result::Result<(), SendError<PrintMessage>> {
-    QUEUE.send(PrintMessage::Log(log)).await?;
+pub fn print_log(log: String) -> std::result::Result<(), SendError<PrintMessage>> {
+    QUEUE.send(PrintMessage::Log(log))?;
     Ok(())
 }
 
-pub(crate) async fn fresh_state(new_state: State) -> std::result::Result<(), SendError<PrintMessage>> {
-    QUEUE.send(PrintMessage::State(new_state)).await?;
+pub fn fresh_state(new_state: State) -> std::result::Result<(), SendError<PrintMessage>> {
+    QUEUE.send(PrintMessage::State(new_state))?;
     Ok(())
 }
 
@@ -116,21 +116,20 @@ pub(crate) async fn fresh_state(new_state: State) -> std::result::Result<(), Sen
 mod test {
     use crate::base::terminal::{print_log, fresh_state, State};
     use std::time::Duration;
-    use async_std::task;
-    use async_std::task::JoinHandle;
+    use std::thread;
 
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
     #[test]
     fn print_test() {
-        let mut j = task::spawn(async {
-            fresh_state(State::Magenta("2█".to_string())).await
+        let mut j = thread::spawn(|| {
+            fresh_state(State::Magenta("2█".to_string()))
         });
-        task::block_on(async move {
-            print_log("123".to_string()).await.unwrap();
-            print_log(456.to_string()).await.unwrap();
-            task::sleep(Duration::from_micros(1000)).await;
-            j.await.unwrap()
-        })
+        thread::spawn(move || {
+            print_log("123".to_string()).unwrap();
+            print_log(456.to_string()).unwrap();
+            thread::sleep(Duration::from_micros(1000));
+            j.join();
+        }).join();
     }
 }

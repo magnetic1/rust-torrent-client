@@ -222,7 +222,7 @@ impl TrackerSupervisor {
                 // try announce
                 let h: JoinHandle<Result<()>> = async_std::task::spawn(async move {
                     loop {
-                        terminal::print_log(format!("try {}", announce)).await?;
+                        terminal::print_log(format!("try {}", announce))?;
                         let result =
                             try_announce(&announce, &peer_id, &info_hash, len, listener_port).await;
                         match result {
@@ -313,7 +313,7 @@ async fn get_tracker_response_surf(
     ];
 
     let url = format!("{}?{}", announce, encode_query_params(&params));
-    terminal::print_log(format!("{}", url)).await?;
+    terminal::print_log(format!("{}", url))?;
 
     let req = surf::get(&url)
         .header("Connection", "close")
@@ -322,10 +322,10 @@ async fn get_tracker_response_surf(
     let body = surf::http::Body::from_reader(req, None);
 
     let buf = body.into_bytes().await?;
-    terminal::print_log(format!("{}", buf.len())).await?;
+    terminal::print_log(format!("{}", buf.len()))?;
 
     let res = TrackerResponse::parse(&buf)?;
-    terminal::print_log(format!("{:#?}", res)).await?;
+    terminal::print_log(format!("{:#?}", res))?;
 
     Ok(res)
 }
@@ -370,7 +370,7 @@ impl FromValue for TrackerResponse {
             Value::List(_) => FromValue::from_value(peers_value)?,
             Value::Bytes(b) => b.chunks(6).map(Peer::from_bytes).collect(),
             v => {
-                // terminal::print_log(format!("{:#?}", v)).await?;
+                // terminal::print_log(format!("{:#?}", v))?;
                 Err(DecodeError::ExtraneousData)?
             }
         };

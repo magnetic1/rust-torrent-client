@@ -125,9 +125,7 @@ impl Download {
             let valid = verify(piece, &*self.files, &self.file_offsets).await?;
 
             if !valid {
-                terminal::print_log(
-                    format!("verify {} {} {}", piece_index, piece.length, valid)
-                ).await?;
+                terminal::print_log(format!("verify {} {} {}", piece_index, piece.length, valid))?;
                 piece.reset_blocks();
                 return Ok(());
             }
@@ -141,12 +139,12 @@ impl Download {
         // println!("block {} complete", block_index);
         // notify peers if piece is complete
         if self.pieces[piece_index as usize].is_complete {
-            terminal::print_log(format!("send Piece {} complete", piece_index)).await?;
+            terminal::print_log(format!("send Piece {} complete", piece_index))?;
             self.broadcast(IPC::PieceComplete(piece_index)).await?;
         }
         // notify peers if download is complete
         if self.is_complete() {
-            terminal::print_log(format!("send Download complete")).await?;
+            terminal::print_log(format!("send Download complete"))?;
             self.broadcast(IPC::DownloadComplete).await?;
         }
 
@@ -172,7 +170,7 @@ impl Download {
 
             if file_is_complete {
                 let file_index = i + index;
-                terminal::print_log(format!("{}: file_is_complete", file_index)).await?;
+                terminal::print_log(format!("{}: file_is_complete", file_index))?;
                 self.rename_temp_file(file_index).await?;
             }
         }
@@ -280,7 +278,7 @@ pub async fn download_loop(
     };
 
     while let Some(event) = rx.next().await {
-        // terminal::print_log(format!("download loop: {:?}", event)).await?;
+        // terminal::print_log(format!("download loop: {:?}", event))?;
 
         match event {
             ManagerEvent::Download(Message::Piece(piece_index, offset, data)) => {
@@ -322,7 +320,7 @@ async fn verify(
     piece.is_complete = piece.hash == Sha1::calculate_sha1(&buffer);
 
     if !piece.is_complete {
-        terminal::print_log(format!("{:?}", Sha1::calculate_sha1(&buffer))).await?;
+        terminal::print_log(format!("{:?}", Sha1::calculate_sha1(&buffer)))?;
     }
 
     Ok(piece.is_complete)
@@ -491,7 +489,7 @@ pub mod download_inline {
                 match fs::metadata(s.clone()) {
                     Ok(_) => {}
                     Err(_) => {
-                        terminal::print_log(format!("create dir: {}", s)).await?;
+                        terminal::print_log(format!("create dir: {}", s))?;
                         fs::create_dir_all(s).unwrap()
                     }
                 }
