@@ -6,10 +6,8 @@ use crossterm::{
 };
 use std::io::{stdout, Stdout};
 use std::thread;
-use std::time::Duration;
-use crate::base::spawn_and_log_error;
 use once_cell::sync::Lazy;
-use crossbeam::channel::{unbounded, Sender, SendError, RecvError};
+use crossbeam::channel::{unbounded, Sender, SendError};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -82,7 +80,7 @@ impl State {
 // static mut SENDER: Option<Sender<PrintMessage>> = None;
 // static mut JOIN_HANDLE: Option<task::JoinHandle<()>> = None;
 static QUEUE: Lazy<Sender<PrintMessage>> = Lazy::new(|| {
-    let (mut sender, receiver) = unbounded();
+    let (sender, receiver) = unbounded();
     let _j = thread::spawn(move || -> Result<()> {
         let stdout = stdout();
         let mut printer = Printer::new(stdout);
@@ -118,18 +116,16 @@ mod test {
     use std::time::Duration;
     use std::thread;
 
-    type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
     #[test]
     fn print_test() {
-        let mut j = thread::spawn(|| {
+        let j = thread::spawn(|| {
             fresh_state(State::Magenta("2█".to_string()))
         });
         thread::spawn(move || {
             print_log("123".to_string()).unwrap();
             print_log(456.to_string()).unwrap();
             thread::sleep(Duration::from_micros(1000));
-            j.join();
-        }).join();
+            j.join().unwrap().unwrap();
+        }).join().unwrap();
     }
 }

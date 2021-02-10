@@ -12,7 +12,6 @@ use async_std::net::UdpSocket;
 use url::percent_encoding::{percent_encode, FORM_URLENCODED_ENCODE_SET};
 use crate::base::terminal;
 use futures::SinkExt;
-use crate::bencode::decode::DecodeError;
 
 pub struct Tracker {
     pub(crate) metadata: Arc<TorrentMetaInfo>,
@@ -63,10 +62,10 @@ impl Tracker {
                 self.to_manager.send(ManagerEvent::Tracker(TrackerMessage::Peers(peer_addrs))).await?;
             }
             Err(TrackerError::Unresponsive) => {
-                self.send_to_supervisor(HostUnresolved).await;
+                self.send_to_supervisor(HostUnresolved).await?;
             }
             Err(e) => {
-                self.send_to_supervisor(ErrorOccurred(Box::new(e.clone()))).await;
+                self.send_to_supervisor(ErrorOccurred(Box::new(e.clone()))).await?;
                 return Err(e);
             }
         };

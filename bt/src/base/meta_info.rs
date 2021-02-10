@@ -86,6 +86,16 @@ impl TorrentMetaInfo {
                 .collect::<Vec<_>>()
         }).unwrap_or_else(Vec::new);
 
+        self.announce.as_ref().and_then(|s| {
+            s.parse::<Url>().ok()
+                .map(|s| {
+                    let url = Arc::new(s);
+                    if !urls.contains(&url) {
+                        urls.push(url);
+                    };
+                })
+        });
+
         urls
     }
 }

@@ -13,7 +13,7 @@ where
 {
     task::spawn(async move {
         if let Err(e) = fut.await {
-            terminal::print_log(format!("task {} {}", task::current().id(), e));
+            terminal::print_log(format!("task {} {}", task::current().id(), e)).unwrap();
             // eprintln!("task {} {}", task::current().id(), e)
         }
     })

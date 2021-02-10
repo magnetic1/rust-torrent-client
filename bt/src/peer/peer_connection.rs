@@ -18,7 +18,6 @@ use futures::{
     sink::SinkExt,
     FutureExt, StreamExt,
 };
-use rand::Rng;
 use std::collections::HashMap;
 
 use async_std::task::JoinHandle;
@@ -68,7 +67,7 @@ pub struct PeerConnection {
     upload_in_progress: bool,
 
     writer_sender: Sender<Message>,
-    manager_sender: UnboundedSender<ManagerEvent>,
+    _manager_sender: UnboundedSender<ManagerEvent>,
     to_download: Sender<ManagerEvent>,
 }
 
@@ -284,7 +283,7 @@ pub async fn peer_conn_loop(
     peer: Peer,
     ipc_sender: Sender<IPC>,
     ipcs: Receiver<IPC>,
-    manager_sender: UnboundedSender<ManagerEvent>,
+    _manager_sender: UnboundedSender<ManagerEvent>,
     mut require: Sender<ManagerEvent>,
 ) -> Result<()> {
     let have_pieces = {
@@ -313,7 +312,7 @@ pub async fn peer_conn_loop(
         to_request: Default::default(),
         upload_in_progress: false,
         writer_sender,
-        manager_sender,
+        _manager_sender,
         to_download: require,
     };
 

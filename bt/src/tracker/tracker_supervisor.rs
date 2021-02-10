@@ -21,7 +21,6 @@ use crate::base::manager::{Manager, ManagerEvent};
 use crate::base::terminal;
 use crate::peer::peer_connection::Peer;
 use crate::tracker::tracker::Tracker;
-use async_std::future::TimeoutError;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -64,7 +63,7 @@ impl TrackerSupervisor {
         let urls = manager.meta_info.get_urls();
 
         let (_sender, receiver) = mpsc::channel(10);
-        ;
+
         TrackerSupervisor {
             meta_info: manager.meta_info.clone(),
             to_manager: manager.sender_unbounded.clone(),
@@ -76,23 +75,6 @@ impl TrackerSupervisor {
             receiver,
             tracker_states: Default::default(),
         }
-    }
-
-    fn has_announce_list(&self) -> bool {
-        match &self.meta_info.announce_list {
-            Some(_) => true,
-            None => false,
-        }
-    }
-
-    pub async fn start(&mut self) -> Result<()> {
-        if self.has_announce_list() {
-            self.announce_list_loop().await?;
-        } else {
-            // panic!("announce unfinished!")
-            self.announce_loop().await?;
-        }
-        Ok(())
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -226,7 +208,7 @@ impl TrackerSupervisor {
                         let result =
                             try_announce(&announce, &peer_id, &info_hash, len, listener_port).await;
                         match result {
-                            Err(e) => {
+                            Err(_) => {
                                 break;
                             }
                             Ok(response) => {
@@ -245,7 +227,7 @@ impl TrackerSupervisor {
         }
 
         for h in handles {
-            h.await;
+            h.await?;
         }
 
         Ok(())
@@ -369,7 +351,7 @@ impl FromValue for TrackerResponse {
         let peers: Vec<Peer> = match peers_value {
             Value::List(_) => FromValue::from_value(peers_value)?,
             Value::Bytes(b) => b.chunks(6).map(Peer::from_bytes).collect(),
-            v => {
+            _ => {
                 // terminal::print_log(format!("{:#?}", v))?;
                 Err(DecodeError::ExtraneousData)?
             }

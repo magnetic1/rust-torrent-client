@@ -1,8 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use async_std::{
-    sync::{Arc, Mutex},
-};
+use async_std::sync::Arc;
 use futures::{channel::mpsc, channel::mpsc::Sender, select, SinkExt, StreamExt};
 use futures::channel::mpsc::UnboundedSender;
 
@@ -13,7 +11,6 @@ use crate::{
     base::spawn_and_log_error,
 };
 use crate::base::terminal;
-use crate::base::terminal::State;
 use crate::peer::peer_connection::{Peer, peer_conn_loop, RequestMetadata};
 use crate::tracker::tracker_supervisor::{TrackerMessage, TrackerSupervisor};
 
@@ -99,9 +96,7 @@ impl Manager {
                     let mut sender = self.sender_unbounded.clone();
                     async_std::task::spawn(async move {
                         for p in peers {
-                            sender
-                                .send(ManagerEvent::Connection(true, p))
-                                .await;
+                            sender.send(ManagerEvent::Connection(true, p)).await.unwrap();
                         }
                     });
                 }
@@ -215,6 +210,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
     let (disconnect_sender, mut disconnect_receiver) = mpsc::channel(10);
 
     loop {
+        // to fix the warning of intellij-rust
         let mut event = ManagerEvent::Continue;
         select! {
             e = events_unbounded.next() => match e {
