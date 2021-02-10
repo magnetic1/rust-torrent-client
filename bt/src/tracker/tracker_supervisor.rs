@@ -401,7 +401,7 @@ mod test {
     #[test]
     fn tracker_response() {
         let f = fs::read(
-            r#"C:\Users\12287\Downloads\[桜都字幕组][碧蓝航线_Azur Lane][01-12 END][GB][1080P].torrent"#
+            r#"torrent\ubuntu-18.04.5-desktop-amd64.iso.torrent"#
         ).unwrap();
         let mut decoder = Decoder::new(f.as_slice());
 

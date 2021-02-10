@@ -249,8 +249,6 @@ mod test {
     #[test]
     fn into_value() {
         let f = std::fs::read(
-            // "D:/MyVideo/犬夜叉部剧场版[全]/F767AB595A8E5E2162A881D4FE9BF3B4330BF603.torrent"
-            // r#"C:\Users\12287\Downloads\[桜都字幕组][碧蓝航线_Azur Lane][01-12 END][GB][1080P].torrent"#
             r#"torrent\ubuntu-18.04.5-desktop-amd64.iso.torrent"#
         ).unwrap();
 
