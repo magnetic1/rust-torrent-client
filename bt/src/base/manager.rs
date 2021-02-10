@@ -40,7 +40,7 @@ impl Manager {
         match event {
             ManagerEvent::Continue => {}
             ManagerEvent::Broadcast(ipc) => {
-                terminal::print_log(format!("Broadcast {:?}", ipc))?;
+                // terminal::print_log(format!("Broadcast {:?}", ipc))?;
                 let mut delete_keys = Vec::with_capacity(self.peers.len());
                 for (p, s) in self.peers.iter_mut() {
                     match s.send(ipc.clone()).await {
@@ -201,20 +201,16 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
         res
     });
 
-    {
-        let mut ps = Vec::new();
-        ps.push(Peer {
-            ip: "127.0.0.1".to_string(),
-            port: 54682,
-        });
-        // ps.push(Peer {
-        //     ip: "117.22.236.149".to_string(),
-        //     port: 51413,
-        // });
-        for p in ps {
-            manager.sender_unbounded.send(ManagerEvent::Connection(true, p)).await?;
-        }
-    }
+    // {
+    //     let mut ps = Vec::new();
+    //     // ps.push(Peer {
+    //     //     ip: "127.0.0.1".to_string(),
+    //     //     port: 54682,
+    //     // });
+    //     for p in ps {
+    //         manager.sender_unbounded.send(ManagerEvent::Connection(true, p)).await?;
+    //     }
+    // }
 
     let (disconnect_sender, mut disconnect_receiver) = mpsc::channel(10);
 
@@ -235,7 +231,7 @@ pub async fn manager_loop(our_peer_id: String, meta_info: TorrentMetaInfo) -> Re
                 continue;
             },
         };
-        terminal::print_log(format!("manger loop: {:?}", event))?;
+        // terminal::print_log(format!("manger loop: {:?}", event))?;
 
         manager.process_event(event, &disconnect_sender).await?;
     }

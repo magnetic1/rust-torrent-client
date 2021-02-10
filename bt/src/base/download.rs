@@ -105,17 +105,14 @@ impl Download {
         let piece = &mut self.pieces[piece_index as usize];
 
         if piece.has_block(block_index) || piece.is_complete {
-            // if we already have this block, do an early return to avoid re-writing the piece, sending complete messages, etc
+            // if already have this block, return
             return Ok(());
         }
         // println!("file_offsets: {} {} {}", self.file_offsets[0], self.file_offsets[1] ,self.file_offsets[2]);
         // println!("{}: {}", piece_index, block_index);
         store_block(
-            &*self.files,
-            &self.file_offsets,
-            piece.offset,
-            block_index,
-            data,
+            &*self.files, &self.file_offsets,
+            piece.offset, block_index, data
         ).await?;
         // println!("store_block： {} {}", piece_index, block_index);
 
