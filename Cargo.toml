@@ -1,5 +1,5 @@
 [package]
-name = "rustorrent"
+name = "rust-torrent-client"
 version = "0.1.0"
 authors = ["wzq <1228740123@qq.com>"]
 edition = "2018"
