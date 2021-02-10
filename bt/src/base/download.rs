@@ -25,7 +25,7 @@ pub const BLOCK_SIZE: u32 = 16 * 1024;
 struct Block {
     index: u32,
     length: u32,
-    is_complete: bool,
+    is_completed: bool,
 }
 
 impl Block {
@@ -33,7 +33,7 @@ impl Block {
         Block {
             index,
             length,
-            is_complete: false,
+            is_completed: false,
         }
     }
 }
@@ -43,7 +43,7 @@ pub(crate) struct Piece {
     offset: u64,
     hash: Sha1,
     blocks: Vec<Block>,
-    is_complete: bool,
+    is_completed: bool,
 }
 
 impl Piece {
@@ -66,21 +66,21 @@ impl Piece {
             offset,
             hash,
             blocks,
-            is_complete: false,
+            is_completed: false,
         }
     }
 
     fn has_block(&self, block_index: u32) -> bool {
-        self.blocks[block_index as usize].is_complete
+        self.blocks[block_index as usize].is_completed
     }
 
     fn has_all_blocks(&self) -> bool {
-        self.blocks.iter().all(|b| b.is_complete)
+        self.blocks.iter().all(|b| b.is_completed)
     }
 
     fn reset_blocks(&mut self) {
         for block in self.blocks.iter_mut() {
-            block.is_complete = false;
+            block.is_completed = false;
         }
     }
 }
@@ -104,7 +104,7 @@ impl Download {
     ) -> Result<()> {
         let piece = &mut self.pieces[piece_index as usize];
 
-        if piece.has_block(block_index) || piece.is_complete {
+        if piece.has_block(block_index) || piece.is_completed {
             // if already have this block, return
             return Ok(());
         }
@@ -116,7 +116,7 @@ impl Download {
         ).await?;
         // println!("store_block： {} {}", piece_index, block_index);
 
-        piece.blocks[block_index as usize].is_complete = true;
+        piece.blocks[block_index as usize].is_completed = true;
 
         if piece.has_all_blocks() {
             let valid = verify(piece, &*self.files, &self.file_offsets).await?;
@@ -127,22 +127,22 @@ impl Download {
                 return Ok(());
             }
         }
-        piece.is_complete = true;
+        piece.is_completed = true;
         // verify files. rename it if finished.
         self.verify_file(piece_index).await?;
         // println!("BlockComplete： {} {}", piece_index, block_index);
         // notify peers that this block is complete
-        self.broadcast(IPC::BlockComplete(piece_index, block_index)).await?;
+        self.broadcast(IPC::BlockCompleted(piece_index, block_index)).await?;
         // println!("block {} complete", block_index);
         // notify peers if piece is complete
-        if self.pieces[piece_index as usize].is_complete {
+        if self.pieces[piece_index as usize].is_completed {
             terminal::print_log(format!("send Piece {} complete", piece_index))?;
-            self.broadcast(IPC::PieceComplete(piece_index)).await?;
+            self.broadcast(IPC::PieceCompleted(piece_index)).await?;
         }
         // notify peers if download is complete
         if self.is_complete() {
             terminal::print_log(format!("send Download complete"))?;
-            self.broadcast(IPC::DownloadComplete).await?;
+            self.broadcast(IPC::DownloadCompleted).await?;
         }
 
         Ok(())
@@ -163,9 +163,9 @@ impl Download {
             let contained_pieces = &self.pieces[low..=high];
             // println!("low {} high {}", low, high);
 
-            let file_is_complete = contained_pieces.iter().all(|p| p.is_complete);
+            let file_is_completed = contained_pieces.iter().all(|p| p.is_completed);
 
-            if file_is_complete {
+            if file_is_completed {
                 let file_index = i + index;
                 terminal::print_log(format!("{}: file_is_complete", file_index))?;
                 self.rename_temp_file(file_index).await?;
@@ -198,7 +198,7 @@ impl Download {
     pub(crate) async fn retrieve_data(&self, request: RequestMetadata) -> Result<Vec<u8>> {
         let ref piece = self.pieces[request.piece_index as usize];
 
-        if piece.is_complete {
+        if piece.is_completed {
             let offset = piece.offset + request.offset as u64;
             let buf = read(
                 &*self.files,
@@ -215,11 +215,11 @@ impl Download {
 
     fn incomplete_blocks_for_piece(&self, piece_index: u32) -> Vec<(u32, u32)> {
         let ref piece = self.pieces[piece_index as usize];
-        if !piece.is_complete {
+        if !piece.is_completed {
             piece
                 .blocks
                 .iter()
-                .filter(|&b| !b.is_complete)
+                .filter(|&b| !b.is_completed)
                 .map(|b| (b.index, b.length))
                 .collect()
         } else {
@@ -228,7 +228,7 @@ impl Download {
     }
 
     fn is_complete(&self) -> bool {
-        self.pieces.iter().all(|piece| piece.is_complete)
+        self.pieces.iter().all(|piece| piece.is_completed)
     }
 
     async fn broadcast(&mut self, ipc: IPC) -> Result<()> {
@@ -241,7 +241,7 @@ impl Download {
     pub fn have_pieces(&self) -> Vec<bool> {
         let mut res = Vec::with_capacity(self.pieces.len());
         for p in &self.pieces {
-            res.push(p.is_complete);
+            res.push(p.is_completed);
         }
         res
     }
@@ -314,13 +314,13 @@ async fn verify(
     // println!("read piece: {} {}", piece.offset, piece.length);
 
     // calculate the hash, verify it, and update is_complete
-    piece.is_complete = piece.hash == Sha1::calculate_sha1(&buffer);
+    piece.is_completed = piece.hash == Sha1::calculate_sha1(&buffer);
 
-    if !piece.is_complete {
+    if !piece.is_completed {
         terminal::print_log(format!("{:?}", Sha1::calculate_sha1(&buffer)))?;
     }
 
-    Ok(piece.is_complete)
+    Ok(piece.is_completed)
 }
 
 pub async fn store_block(

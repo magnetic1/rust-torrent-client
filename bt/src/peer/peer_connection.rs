@@ -344,7 +344,7 @@ pub async fn peer_conn_loop(
 
         match ipc {
             IPC::Message(message) => process_message(&mut peer_conn, message).await?,
-            IPC::BlockComplete(piece_index, block_index) => {
+            IPC::BlockCompleted(piece_index, block_index) => {
                 peer_conn.to_request.remove(&(piece_index, block_index));
                 match peer_conn.me.requests.remove(piece_index, block_index) {
                     Some(r) => {
@@ -356,7 +356,7 @@ pub async fn peer_conn_loop(
                     None => (),
                 }
             }
-            IPC::PieceComplete(piece_index) => {
+            IPC::PieceCompleted(piece_index) => {
                 peer_conn.me.has_pieces[piece_index as usize] = true;
                 peer_conn.update_my_interested_status().await?;
                 peer_conn
@@ -364,7 +364,7 @@ pub async fn peer_conn_loop(
                     .send(Message::Have(piece_index))
                     .await?;
             }
-            IPC::DownloadComplete => {
+            IPC::DownloadCompleted => {
                 // peer_conn.halt = true;
                 peer_conn.update_my_interested_status().await?;
             }

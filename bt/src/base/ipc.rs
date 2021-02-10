@@ -2,9 +2,9 @@ use std::fmt;
 
 #[derive(Clone, Debug)]
 pub enum IPC {
-    BlockComplete(u32, u32),
-    PieceComplete(u32),
-    DownloadComplete,
+    BlockCompleted(u32, u32),
+    PieceCompleted(u32),
+    DownloadCompleted,
     Message(Message),
     BlockUploaded,
 }
