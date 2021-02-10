@@ -1,4 +1,4 @@
-#rust-torrent-client
+# rust-torrent-client
 Bittorrent client built with async-std.
 
 The library is WIP yet, but you can try:
