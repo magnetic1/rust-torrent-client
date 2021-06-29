@@ -7,7 +7,7 @@ use std::io::Read;
 pub const PEER_ID_PREFIX: &'static str = "-RC0001-";
 
 fn main() {
-    let filename = r#"torrent\ubuntu-18.04.5-desktop-amd64.iso.torrent"#;
+    let filename = r#"torrent/ubuntu-18.04.5-desktop-amd64.iso.torrent"#;
     let mut bytes = Vec::new();
     File::open(filename)
         .unwrap()
